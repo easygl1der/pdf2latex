@@ -1,0 +1,17 @@
+# Secrets
+.mineru_token
+.env
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+
+# OMC state
+.omc/
+
+# Output
+output/
+
+# OS
+.DS_Store
