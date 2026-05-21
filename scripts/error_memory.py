@@ -1,13 +1,14 @@
 """
-LaTeX 错误知识库：记录编译错误模式和修复方案，供后续转录时注入 prompt。
+LaTeX Error Knowledge Base: Records compilation error patterns and fix strategies
+to be injected into prompts during future transcriptions.
 
-存储位置：<project_root>/latex_error_memory.json
-格式：
+Storage Location: <project_root>/latex_error_memory.json
+Format:
   {
     "entries": [
       {
         "error_pattern": "Undefined control sequence \\foo",
-        "fix": "将 \\foo 替换为正确命令或删除",
+        "fix": "Replace \\foo with the correct command or delete it",
         "example_before": "\\foo{text}",
         "example_after": "\\textbf{text}",
         "count": 3,
@@ -82,12 +83,12 @@ def build_memory_prompt() -> str:
     if not entries:
         return ""
 
-    lines = ["\n【历史错误记录（根据过往编译报错总结，务必避免）】"]
+    lines = ["\n【Historical Error Records (Summarized from past compilation errors, MUST AVOID)】"]
     for e in entries[:15]:
-        line = f"- 错误：{e['error_pattern']}  →  修复：{e['fix']}"
+        line = f"- Error: {e['error_pattern']}  →  Fix: {e['fix']}"
         if e.get("example_before") and e.get("example_after"):
-            line += f"\n    错误写法：{e['example_before']}"
-            line += f"\n    正确写法：{e['example_after']}"
+            line += f"\n    Incorrect usage: {e['example_before']}"
+            line += f"\n    Correct usage: {e['example_after']}"
         lines.append(line)
     lines.append("")
     return "\n".join(lines)
@@ -113,11 +114,7 @@ _DIFF_CONTEXT_LINES = 3    # surrounding context lines per diff hunk
 
 
 def _extract_diff_hunks(original: str, reviewed: str) -> list[str]:
-    """Return unified-diff hunks between original and reviewed as a list of strings.
-
-    Each hunk includes _DIFF_CONTEXT_LINES of surrounding context so the LLM
-    can understand what was changed and why.
-    """
+    """Return unified-diff hunks between original and reviewed as a list of strings."""
     import difflib
     orig_lines = original.splitlines(keepends=True)
     rev_lines  = reviewed.splitlines(keepends=True)
@@ -162,15 +159,16 @@ def _call_learn_llm(model_name: str, diff_text: str) -> list[dict]:
     from .llm import call_llm
 
     system = (
-        "你是 LaTeX 专家。以下是一段 unified diff，'-' 行是原始错误写法，'+' 行是修正后写法。\n"
-        "从中总结出通用的 LaTeX 排版规则，避免下次转录时再犯同样的错误。\n"
-        "规则必须具体可执行，例如：'下划线 _ 在正文中必须转义为 \\_'。\n"
-        "只输出 JSON 数组，格式：\n"
-        '[{"error": "错误描述", "fix": "规避规则一句话", '
-        '"before": "错误写法片段", "after": "正确写法片段"}]\n'
-        "只输出 JSON，不要任何解释。"
+        "You are a LaTeX expert. Below is a unified diff, '-' lines are incorrect, "
+        "'+' lines are corrected versions.\n"
+        "Summarize general LaTeX typesetting rules from this to avoid the same mistakes in the future.\n"
+        "Rules must be specific and actionable, e.g., 'Underscore _ in text must be escaped as \\_'.\n"
+        "Output ONLY a JSON array in the following format:\n"
+        '[{"error": "error description", "fix": "one-sentence fix rule", '
+        '"before": "incorrect snippet", "after": "correct snippet"}]\n'
+        "Output ONLY JSON, no explanation."
     )
-    user = f"diff 内容：\n{diff_text}\n\n请输出 JSON 规则数组："
+    user = f"Diff content:\n{diff_text}\n\nPlease output the JSON rule array:"
 
     try:
         raw = call_llm(model_name, system, user, temperature=0.0, show_thinking=False)
@@ -183,13 +181,7 @@ def _call_learn_llm(model_name: str, diff_text: str) -> list[dict]:
 
 
 def learn_from_review(original: str, reviewed: str, model_name: str) -> None:
-    """Extract fix rules from the diff between original and reviewed LaTeX.
-
-    Strategy:
-    1. Compute unified diff — only changed lines are sent to the LLM, not full text.
-    2. Batch hunks into chunks ≤ _DIFF_CHUNK_CHARS so nothing is truncated.
-    3. Each batch is summarized independently; results are merged and de-duped.
-    """
+    """Extract fix rules from the diff between original and reviewed LaTeX."""
     if not original or not reviewed or original.strip() == reviewed.strip():
         return
 
@@ -213,8 +205,8 @@ def learn_from_review(original: str, reviewed: str, model_name: str) -> None:
                 total_rules += 1
 
     if total_rules:
-        print(f"  [Memory] 从 Review 中学习了 {total_rules} 条新规则"
-              f"（{len(batches)} 批次，{len(hunks)} 个 diff 块）")
+        print(f"  [Memory] Learned {total_rules} new rules from Review "
+              f"({len(batches)} batches, {len(hunks)} diff hunks)")
 
 
 def _summarize_with_llm(errors: list[dict], tex_before: str, tex_after: str,
@@ -224,28 +216,27 @@ def _summarize_with_llm(errors: list[dict], tex_before: str, tex_after: str,
 
     error_list = "\n".join(f"- {e['message']}" for e in errors[:10])
 
-    # Only send a diff-like context: first 60 lines of before and after to keep tokens low
+    # Only send a diff-like context: first 60 lines to keep tokens low
     before_sample = "\n".join(tex_before.splitlines()[:60])
     after_sample = "\n".join(tex_after.splitlines()[:60])
 
     system = (
-        "你是 LaTeX 错误分析专家。根据编译报错列表和修复前后的代码片段，"
-        "总结每个错误的修复规律，输出 JSON 数组。\n"
-        "每个元素格式：\n"
-        '{"error_pattern": "错误类型描述", "fix": "修复方法一句话", '
-        '"example_before": "错误写法片段", "example_after": "正确写法片段"}\n'
-        "只输出 JSON 数组，不要任何其他文字。"
+        "You are a LaTeX error analysis expert. Based on the list of compilation errors and "
+        "the code snippets before and after the fix, summarize the fix patterns and output a JSON array.\n"
+        "Each element format:\n"
+        '{"error_pattern": "error type description", "fix": "one-sentence fix method", '
+        '"example_before": "incorrect snippet", "example_after": "correct snippet"}\n'
+        "Output ONLY the JSON array, no other text."
     )
     user = (
-        f"编译报错：\n{error_list}\n\n"
-        f"修复前（前60行）：\n{before_sample}\n\n"
-        f"修复后（前60行）：\n{after_sample}\n\n"
-        "请输出 JSON 数组总结修复规律："
+        f"Compilation errors:\n{error_list}\n\n"
+        f"Before fix (first 60 lines):\n{before_sample}\n\n"
+        f"After fix (first 60 lines):\n{after_sample}\n\n"
+        "Please output the JSON array summarizing fix patterns:"
     )
 
     try:
         raw = call_llm(model_name, system, user, temperature=0.0, show_thinking=False)
-        # Extract JSON array
         m = re.search(r'\[.*\]', raw, re.DOTALL)
         if not m:
             raise ValueError("no JSON array found")
@@ -258,10 +249,9 @@ def _summarize_with_llm(errors: list[dict], tex_before: str, tex_after: str,
                     item.get("example_before", ""),
                     item.get("example_after", ""),
                 )
-        print(f"  [Memory] 记录 {len(items)} 条修复规律")
+        print(f"  [Memory] Recorded {len(items)} fix patterns")
     except Exception as e:
-        # Fallback to rule-based on any failure
-        print(f"  [Memory] LLM 总结失败（{e}），使用规则兜底")
+        print(f"  [Memory] LLM summarization failed ({e}), using rule-based fallback")
         _summarize_rule_based(errors, tex_before, tex_after)
 
 
@@ -280,7 +270,6 @@ def _summarize_rule_based(errors: list[dict], tex_before: str, tex_after: str) -
         if ln > 0:
             b_idx = ln - 1
             example_before = before_lines[b_idx].strip() if b_idx < len(before_lines) else ""
-            # after may have shifted lines; best effort same index
             example_after = after_lines[b_idx].strip() if b_idx < len(after_lines) else ""
 
         record_fix(msg, _infer_fix(msg), example_before, example_after)
@@ -289,21 +278,21 @@ def _summarize_rule_based(errors: list[dict], tex_before: str, tex_after: str) -
 def _infer_fix(error_msg: str) -> str:
     msg = error_msg.lower()
     if "undefined control sequence" in msg:
-        return "检查命令拼写，确保反斜杠和命令名正确，或补充所需宏包"
+        return "Check command spelling, ensure backslashes are correct, or add required packages"
     if "missing $ inserted" in msg:
-        return "数学符号/命令必须在 $...$ 或 \\[...\\] 数学环境内使用"
+        return "Math symbols/commands must be used within $...$ or \\[...\\] environments"
     if "undefined citation" in msg or "\\cite{" in error_msg:
-        return "在 thebibliography 环境中补充对应的 \\bibitem{key}"
+        return "Add the corresponding \\bibitem{key} in the thebibliography environment"
     if "undefined reference" in msg or "\\ref{" in error_msg:
-        return "确保 \\label{key} 存在且与 \\ref{key} 的 key 一致"
+        return "Ensure \\label{key} exists and matches the key in \\ref{key}"
     if "environment" in msg and "undefined" in msg:
-        return "检查环境名拼写（使用完整名称：theorem/lemma/proof 等），确保已在 preamble 中定义"
+        return "Check environment spelling (use full names: theorem/lemma/proof etc.), ensure it is defined in preamble"
     if "missing \\begin{document}" in msg:
-        return "确保文件包含 \\begin{document} ... \\end{document} 结构"
+        return "Ensure the file contains the \\begin{document} ... \\end{document} structure"
     if "extra }" in msg or "too many }" in msg:
-        return "删除多余的 } 括号，检查 \\begin{env}} 等双括号错误"
+        return "Remove extra } braces, check for double brace errors like \\begin{env}}"
     if "runaway argument" in msg:
-        return "检查括号是否配对，通常是 { 未关闭"
+        return "Check for matching braces, usually a { is not closed"
     if "file not found" in msg:
-        return "检查 \\input 或 \\includegraphics 引用的文件是否存在"
-    return "根据报错上下文修正对应行的 LaTeX 语法"
+        return "Check if files referenced by \\input or \\includegraphics exist"
+    return "Fix LaTeX syntax according to the error context"

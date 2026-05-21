@@ -1,27 +1,23 @@
 """
-CrossRef API 工具：根据标题/作者/Key 搜索文献元数据
+CrossRef API Tool: Search literature metadata based on title/author/key.
 """
 
 import requests
 import re
 from typing import Optional, Dict, Any, List
-
-import requests
-import re
 import xml.etree.ElementTree as ET
 import time
-from typing import Optional, Dict, Any, List
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
-# ── 配置与 Session 初始化 ─────────────────────────────────────
+# ── Configuration and Session Initialization ──────────────────────────
 
 def get_session():
-    """创建一个具备重试机制的 Session (参考 mdnice 文章)"""
+    """Create a Session with retry mechanism."""
     session = requests.Session()
     retries = Retry(
-        total=10,  # 增加总重试次数
-        backoff_factor=2.0,  # 增加退避时间，1.0 -> 2.0 -> 4.0 ...
+        total=10,
+        backoff_factor=2.0,
         status_forcelist=[429, 500, 502, 503, 504],
         allowed_methods=["HEAD", "GET", "OPTIONS"]
     )
@@ -36,11 +32,11 @@ _HEADERS = {
 }
 
 def search_crossref(query: str) -> Optional[Dict[str, Any]]:
-    """通过 CrossRef API 搜索文献，获取元数据。"""
+    """Search for literature through the CrossRef API and retrieve metadata."""
     base_url = "https://api.crossref.org/works"
     clean_query = re.sub(r'[^a-zA-Z0-9\s]', ' ', query).strip()
     
-    # 策略：尝试 bibliographic 搜索
+    # Strategy: Try bibliographic search
     try:
         params = {"query.bibliographic": clean_query, "rows": 1}
         response = _SESSION.get(base_url, params=params, headers=_HEADERS, timeout=15)
@@ -50,12 +46,12 @@ def search_crossref(query: str) -> Optional[Dict[str, Any]]:
             if items:
                 return items[0]
     except Exception as e:
-        print(f"  [CrossRef] 搜索异常: {e}")
+        print(f"  [CrossRef] Search exception: {e}")
     
     return None
 
 def get_crossref_bibtex(doi: str) -> Optional[str]:
-    """利用 DOI 通过内容协商获取标准的 BibTeX 格式。"""
+    """Retrieve standard BibTeX format using DOI through content negotiation."""
     url = f"https://api.crossref.org/works/{doi}/transform/application/x-bibtex"
     try:
         response = _SESSION.get(url, headers=_HEADERS, timeout=10)
@@ -66,7 +62,7 @@ def get_crossref_bibtex(doi: str) -> Optional[str]:
     return None
 
 def search_arxiv(query: str) -> Optional[Dict[str, Any]]:
-    """通过 arXiv API 搜索文献。"""
+    """Search for literature through the arXiv API."""
     clean_query = re.sub(r'[^a-zA-Z0-9\s]', ' ', query).strip().replace(' ', '+')
     url = f"http://export.arxiv.org/api/query?search_query=all:{clean_query}&start=0&max_results=1"
     
@@ -90,12 +86,11 @@ def search_arxiv(query: str) -> Optional[Dict[str, Any]]:
                     "container-title": ["arXiv preprint"]
                 }
     except Exception as e:
-        print(f"  [arXiv] 搜索异常: {e}")
+        print(f"  [arXiv] Search exception: {e}")
     return None
 
 def format_bibitem(key: str, item: Dict[str, Any]) -> str:
-    """将搜索结果格式化为 \\bibitem。"""
-    # 优先尝试获取标准的 BibTeX 并从中提取（如果需要的话，目前保持手动格式化以适配 \bibitem）
+    """Format search results as \\bibitem."""
     title = item.get("title", ["Unknown Title"])[0]
     authors_list = item.get("author", [])
     if authors_list:
@@ -103,7 +98,7 @@ def format_bibitem(key: str, item: Dict[str, Any]) -> str:
     else:
         authors = "Unknown Author"
         
-    pub = item.get("published-print") or item.get("published-online") or item.get("issued") or item.get("issued")
+    pub = item.get("published-print") or item.get("published-online") or item.get("issued")
     year = ""
     if pub and "date-parts" in pub:
         year = pub["date-parts"][0][0]
@@ -119,20 +114,20 @@ def format_bibitem(key: str, item: Dict[str, Any]) -> str:
     return f"\\bibitem{{{key}}} {authors}. {title}.{journal_str}{year_str}.{doi_str}"
 
 def extract_citations(latex_text: str) -> List[str]:
-    r"""提取所有 \cite{key1,key2} 中的 keys。"""
+    r"""Extract all keys from \cite{key1,key2}."""
     keys = []
-    # 匹配 \cite{key1, key2}
+    # Match \cite{key1, key2}
     matches = re.findall(r'\\cite\{([^}]+)\}', latex_text)
     for m in matches:
-        # 分割逗号并去空格
+        # Split by comma and strip whitespace
         parts = [p.strip() for p in m.split(',')]
         keys.extend(parts)
     return sorted(list(set(keys)))
 
 def extract_bibitems(latex_text: str) -> Dict[str, str]:
-    r"""提取 \bibitem{key} 之后的所有文本内容。"""
+    r"""Extract all text content following \bibitem{key}."""
     items = {}
-    # 匹配 \bibitem{key} 后面的内容，直到下一个 \bibitem 或环境结束
+    # Match content after \bibitem{key} until the next \bibitem or end of environment
     pattern = re.compile(r'\\bibitem\{([^}]+)\}\s*(.*?)(?=\\bibitem|\\end\{thebibliography\}|$)', re.DOTALL)
     for m in pattern.finditer(latex_text):
         key = m.group(1).strip()
