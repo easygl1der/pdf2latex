@@ -32,7 +32,7 @@ PROHIBITED:
 - Markdown syntax (**bold**, *italic*, - list, > callout).
 - \bm{} (Use \mathbf{} for vectors, \boldsymbol{} for matrices).
 - \ref{} (Must use \cref{}).
-- \tag{} (Must use \label{eq:name} + \cref{eq:name}).
+- \tag{} (Must use \label{equation:name} + \cref{equation:name}).
 - Unicode subscripts n₁ (Use $n_1$).
 - Using itemize inside Definition/Theorem environments (Use enumerate instead).
 - Writing \end{document} at the end of chapter files.
@@ -53,14 +53,16 @@ MANDATORY:
 - Vectors: \mathbf{x}, Matrices: \boldsymbol{X}
 
 【Label Naming Conventions】
-- Theorem/Definition: \label{def:NameXX}
-- Equation: \label{eq:name}
-- Section: \label{sec:name}
-- Exercise: \label{exr:chapter-num}
+- Theorem: \label{theorem:NameXX}
+- Lemma: \label{lemma:NameXX}
+- Definition: \label{definition:NameXX}
+- Equation: \label{equation:name}
+- Section: \label{section:name}
+- Exercise: \label{exercise:chapter-num}
 
 【Body vs. Appendix】
 - Keep only core formulas and main conclusions in the main body.
-- Put full derivations in the appendix, referencing them via \footnote{See Appendix \cref{sec:xxx} for derivation.} in the main body.
+- Put full derivations in the appendix, referencing them via \footnote{See Appendix \cref{section:xxx} for derivation.} in the main body.
 - Concepts appearing for the first time must have a definition (in footnote or body).
 
 【Example Environment】

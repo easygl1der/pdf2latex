@@ -91,7 +91,7 @@ Mimic the narrative style of Stein's *Fourier Analysis* and *Complex Analysis*:
 | `\bm{X}` (Matrix) | `\boldsymbol{X}` |
 | `\I` (Indicator Function) | `\mathbb{I}` |
 | `$n₁$` (Unicode Subscript) | `$n_1$` |
-| `\tag{}` (Hard-coded Equation Number) | `\label{eq:name}` + `\cref{eq:name}` |
+| `\tag{}` (Hard-coded Equation Number) | `\label{equation:name}` + `\cref{equation:name}` |
 | `\ref{}` (Bare Reference) | `\cref{}` (using cleveref package) |
 | `\include` (Chapter Inclusion) | `\input` |
 | `\end{document}` in chapter files | **Absolutely Prohibited** (it truncates subsequent chapters) |
@@ -146,12 +146,12 @@ Mimic the narrative style of Stein's *Fourier Analysis* and *Complex Analysis*:
 
 | Type | Format | Example |
 |------|--------|---------|
-| Def/Thm | `\label{def:NameXX}` | `\label{def:NeymanTheorem}` |
-| Lemma | `\label{def:LemmaXX}` | `\label{def:LemmaNeyman}` |
-| Section | `\label{sec:name}` | `\label{sec:introduction}` |
-| Equation | `\label{eq:name}` | `\label{eq:ATE}` |
-| Figure | `\label{fig:name}` | `\label{fig:dag-example}` |
-| Exercise | `\label{exr:chapter-num}` | `\label{exr:5-1}` |
+| Def/Thm | `\label{definition:NameXX}` | `\label{theorem:NeymanTheorem}` |
+| Lemma | `\label{lemma:NameXX}` | `\label{lemma:Neyman}` |
+| Section | `\label{section:name}` | `\label{section:introduction}` |
+| Equation | `\label{equation:name}` | `\label{equation:ATE}` |
+| Figure | `\label{figure:name}` | `\label{figure:dag-example}` |
+| Exercise | `\label{exercise:chapter-num}` | `\label{exercise:5-1}` |
 
 ### Example Environment (Motivation First)
 

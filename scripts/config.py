@@ -9,20 +9,13 @@ import operator
 
 # ── API Keys ──────────────────────────────────────────────────
 MINERU_API_KEY  = os.getenv("MINERU_API_KEY",  "")
-MINIMAX_API_KEY = os.getenv("MINIMAX_API_KEY", "")
 OPENAI_API_KEY  = os.getenv("OPENAI_API_KEY",  "")
 
 # ── Model Configuration ───────────────────────────────────────
 OLLAMA_BASE_URL   = os.getenv("OLLAMA_BASE_URL",   "http://localhost:11434/v1")
-OLLAMA_MODEL_NAME = os.getenv("OLLAMA_MODEL_NAME", "nemotron-3-super")
+OLLAMA_MODEL_NAME = os.getenv("OLLAMA_MODEL_NAME", "nemotron-3-super:cloud")
 
 MODELS = {
-    "minimax": {
-        "base_url":   "https://api.minimax.chat/v1",
-        "api_key":    lambda: MINIMAX_API_KEY,
-        "model":      "MiniMax-M2.7-highspeed",
-        "max_tokens": 196608,
-    },
     "openai": {
         "base_url":   "https://api.openai.com/v1",
         "api_key":    lambda: OPENAI_API_KEY,

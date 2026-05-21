@@ -36,7 +36,6 @@ pip install -r requirements.txt
 ## Configure API Keys
 ```bash
 export MINERU_API_KEY="Your MinerU Key"     # Get from mineru.net
-export MINIMAX_API_KEY="Your MiniMax Key"   # Get from minimax.chat
 # Optional, needed when using OpenAI models:
 export OPENAI_API_KEY="Your OpenAI Key"
 ```
@@ -51,7 +50,7 @@ python main.py --list-templates
 python main.py mybook.pdf --template amsart
 
 # Use ctexart template (Chinese textbook style)
-python main.py mybook.pdf --template ctexart --model minimax
+python main.py mybook.pdf --template ctexart --model ollama
 
 # Use article template + OpenAI model
 python main.py mybook.pdf --template article --model openai
