@@ -12,6 +12,7 @@ __pycache__/
 
 # Output
 output/
+transcript/
 
 # OS
 .DS_Store

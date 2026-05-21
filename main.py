@@ -9,7 +9,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent / "scripts"))
 
-from scripts.config import TEMPLATES, MODELS
+from scripts.config import TEMPLATES, MODELS, OUTPUT_ROOT
 from scripts.transcribe import mineru_convert
 from scripts.pipeline import build_graph
 
@@ -40,6 +40,9 @@ def main():
 
     markdown_path = mineru_convert(args.pdf)
 
+    pdf_stem = Path(args.pdf).stem
+    output_dir = str(OUTPUT_ROOT / pdf_stem)
+
     graph = build_graph()
     graph.invoke({
         "pdf_path":        args.pdf,
@@ -47,16 +50,19 @@ def main():
         "template_name":   args.template,
         "model_name":      args.model,
         "doc_title":       "",
+        "doc_type":        "",
+        "output_dir":      output_dir,
         "chapters":        [],
         "chapter_outputs": [],
+        "reviewed_outputs": [],
         "final_latex":     "",
     })
 
     print("\n" + "=" * 60)
     print(f"  完成！")
-    print(f"  主文件:   output/main.tex")
-    print(f"  模块版:   output/main_modular.tex")
-    print(f"  各章节:   output/ch*.tex")
+    print(f"  输出目录: output/{pdf_stem}/")
+    print(f"  主文件:   output/{pdf_stem}/main.tex")
+    print(f"  各章节:   output/{pdf_stem}/chapter-*.tex")
     print("=" * 60)
 
 

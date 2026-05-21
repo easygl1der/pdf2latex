@@ -26,9 +26,8 @@ MODELS = {
     },
 }
 
-# ── 输出目录 ──────────────────────────────────────────────────
-OUTPUT_DIR = Path("output")
-OUTPUT_DIR.mkdir(exist_ok=True)
+# ── 输出根目录 ────────────────────────────────────────────────
+OUTPUT_ROOT = Path(__file__).parent.parent / "output"
 
 # ── LaTeX 模板库 ──────────────────────────────────────────────
 TEMPLATES = {
@@ -37,7 +36,11 @@ TEMPLATES = {
         "desc": "AMS Article — 适合数学论文/笔记，自带定理环境",
         "preamble": r"""\documentclass{amsart}
 \usepackage{amsmath, amssymb, amsthm}
-\usepackage[UTF8]{ctex}
+\usepackage{fontspec}
+\usepackage{xeCJK}
+\setCJKmainfont{SimSun}
+\setCJKsansfont{SimHei}
+\setCJKmonofont{FangSong}
 \usepackage{hyperref}
 
 \newtheorem{theorem}{Theorem}[section]
@@ -68,7 +71,11 @@ __BODY__
     "article": {
         "desc": "标准 Article — 通用文章，适合教材笔记",
         "preamble": r"""\documentclass[12pt, a4paper]{article}
-\usepackage[UTF8]{ctex}
+\usepackage{fontspec}
+\usepackage{xeCJK}
+\setCJKmainfont{SimSun}
+\setCJKsansfont{SimHei}
+\setCJKmonofont{FangSong}
 \usepackage{amsmath, amssymb, amsthm}
 \usepackage{geometry}
 \geometry{top=2.5cm, bottom=2.5cm, left=3cm, right=3cm}
@@ -126,7 +133,11 @@ __BODY__
     "beamer": {
         "desc": "Beamer 幻灯片 — 将教材内容转成演示文稿",
         "preamble": r"""\documentclass{beamer}
-\usepackage[UTF8]{ctex}
+\usepackage{fontspec}
+\usepackage{xeCJK}
+\setCJKmainfont{SimSun}
+\setCJKsansfont{SimHei}
+\setCJKmonofont{FangSong}
 \usepackage{amsmath, amssymb}
 \usetheme{Madrid}
 \usecolortheme{default}
@@ -154,6 +165,7 @@ __BODY__
 class Chapter(TypedDict):
     index: int
     title: str
+    level: int
     line_start: int
     line_end: int
 
@@ -163,14 +175,17 @@ class ChapterOutput(TypedDict):
     latex_body: str
 
 class PipelineState(TypedDict):
-    pdf_path:        str
-    markdown_path:   str
-    template_name:   str
-    model_name:      str
-    doc_title:       str
-    chapters:        List[Chapter]
-    chapter_outputs: Annotated[List[ChapterOutput], operator.add]
-    final_latex:     str
+    pdf_path:         str
+    markdown_path:    str
+    template_name:    str
+    model_name:       str
+    doc_title:        str
+    doc_type:         str   # "book" | "paper"
+    output_dir:       str
+    chapters:         List[Chapter]
+    chapter_outputs:  Annotated[List[ChapterOutput], operator.add]
+    reviewed_outputs: List[ChapterOutput]
+    final_latex:      str
 
 class WriterInput(TypedDict):
     chapter:       Chapter
@@ -178,3 +193,5 @@ class WriterInput(TypedDict):
     all_titles:    List[str]
     template_name: str
     model_name:    str
+    doc_type:      str
+    output_dir:    str
