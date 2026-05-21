@@ -5,6 +5,7 @@ LangGraph 节点：supervisor / dispatch / chapter_writer / retriever / assemble
 import json
 import re
 import subprocess
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
 from langgraph.types import Send
@@ -16,7 +17,7 @@ from .error_memory import build_memory_prompt, summarize_fixes, learn_from_revie
 
 # ── 工具函数 ──────────────────────────────────────────────────
 
-def _fix_latex_envs(tex: str) -> str:
+def _fix_latex_envs(tex: str, md_source: str = "") -> str:
     """Repair common malformed LaTeX syntax produced by LLMs.
 
     Patterns fixed:
@@ -29,7 +30,15 @@ def _fix_latex_envs(tex: str) -> str:
       \\end{env}}       extra closing brace
       \\begin{cor}      abbreviated env name → corollary
       \\section[x]      [] vs {} on mandatory-arg commands
+      missing \\begin{document} before \\begin{abstract}/\\maketitle
     """
+    # Ensure \begin{document} exists before \begin{abstract} or \maketitle
+    if r'\begin{document}' not in tex:
+        for marker in (r'\begin{abstract}', r'\maketitle', r'\section'):
+            idx = tex.find(marker)
+            if idx != -1:
+                tex = tex[:idx] + r'\begin{document}' + '\n\n' + tex[idx:]
+                break
     # Missing backslash on begin/end
     tex = re.sub(r'(?<!\\)\bbegin\{', r'\\begin{', tex)
     tex = re.sub(r'(?<!\\)\bend\{',   r'\\end{',   tex)
@@ -85,7 +94,157 @@ def _fix_latex_envs(tex: str) -> str:
         )
     # Full token scan: find every begin/end occurrence and ensure correct form
     tex = _audit_env_tokens(tex)
+    # Mismatched begin/end pairs: fix \end{X} to match its \begin{Y} on the stack
+    tex = _fix_mismatched_envs(tex, md_source=md_source)
+    # Normalize sub/superscript spacing: _ { → _{, ^ { → ^{, _ x → _x, ^ x → ^x
+    tex = re.sub(r'([_^])\s+\{', r'\1{', tex)
+    tex = re.sub(r'([_^])\s+([A-Za-z0-9])', r'\1\2', tex)
+    # Remove space between math commands and their opening brace: \mathbf { → \mathbf{
+    _MATH_CMDS_PAT = (
+        r'mathbf|mathit|mathrm|mathbb|mathfrak|mathcal|mathsf|mathtt|mathscr'
+        r'|overline|underline|widehat|widetilde|hat|tilde|vec|bar|dot|ddot'
+        r'|sqrt|boldsymbol|pmb'
+    )
+    tex = re.sub(r'(\\(?:' + _MATH_CMDS_PAT + r'))\s+\{', r'\1{', tex)
+    # For math font commands, also strip spaces inside braces: \mathbf{ x } → \mathbf{x}
+    # (safe because these commands take a compact identifier, never prose)
+    _MATH_FONT_PAT = r'mathbf|mathit|mathrm|mathbb|mathfrak|mathcal|mathsf|mathtt|mathscr|boldsymbol|pmb'
+    def _strip_font_spaces(m: re.Match) -> str:
+        inner = re.sub(r'\s+', '', m.group(2))
+        return m.group(1) + inner + '}'
+    tex = re.sub(r'(\\(?:' + _MATH_FONT_PAT + r')\{)([^{}]*)\}', _strip_font_spaces, tex)
     return tex
+
+
+# ── Label-prefix → env name mapping (most reliable signal) ──────
+_LABEL_PREFIX_TO_ENV: dict[str, str] = {
+    'thm': 'theorem',       'theorem': 'theorem',
+    'lem': 'lemma',         'lemma': 'lemma',
+    'prop': 'proposition',  'proposition': 'proposition',
+    'cor': 'corollary',     'corollary': 'corollary',
+    'def': 'definition',    'defn': 'definition',   'definition': 'definition',
+    'rem': 'remark',        'rmk': 'remark',        'remark': 'remark',
+    'ex': 'example',        'exm': 'example',       'example': 'example',
+    'proof': 'proof',       'pf': 'proof',
+    'conj': 'conjecture',   'conjecture': 'conjecture',
+    'sol': 'solution',      'soln': 'solution',     'solution': 'solution',
+    'obs': 'observation',   'observation': 'observation',
+    'nota': 'notation',     'notation': 'notation',
+    'claim': 'claim',       'fact': 'fact',
+}
+
+# ── Content keyword hints (checked in order; first match wins) ───
+_CONTENT_HINTS: list[tuple[re.Pattern, str]] = [
+    (re.compile(r'^\s*Proof[\.\:\s]|^\s*证明[\.\：\s]', re.MULTILINE), 'proof'),
+    (re.compile(r'\bTheorem\b|\b定理\b',     re.IGNORECASE), 'theorem'),
+    (re.compile(r'\bLemma\b|\b引理\b',       re.IGNORECASE), 'lemma'),
+    (re.compile(r'\bProposition\b|\b命题\b', re.IGNORECASE), 'proposition'),
+    (re.compile(r'\bCorollary\b|\b推论\b',   re.IGNORECASE), 'corollary'),
+    (re.compile(r'\bDefinition\b|\b定义\b',  re.IGNORECASE), 'definition'),
+    (re.compile(r'\bRemark\b|\b注记\b',      re.IGNORECASE), 'remark'),
+    (re.compile(r'\bExample\b|\b例题?\b',    re.IGNORECASE), 'example'),
+    (re.compile(r'\bConjecture\b|\b猜想\b',  re.IGNORECASE), 'conjecture'),
+]
+
+
+def _infer_env_name(content: str, md_source: str = "") -> str | None:
+    """Infer the correct env name from content between \\begin and \\end.
+
+    Priority:
+    1. \\label{prefix:...} — most reliable
+    2. Keyword hints in the LaTeX content
+    3. If md_source provided, search for the label key there
+    """
+    # 1. Label prefix
+    label_m = re.search(r'\\label\{([A-Za-z]+)[:\-_]', content)
+    if label_m:
+        prefix = label_m.group(1).lower()
+        if prefix in _LABEL_PREFIX_TO_ENV:
+            return _LABEL_PREFIX_TO_ENV[prefix]
+
+    # 2. Content keywords
+    for pattern, env in _CONTENT_HINTS:
+        if pattern.search(content):
+            return env
+
+    # 3. Markdown fallback: find label key in md_source and check surrounding text
+    if md_source and label_m:
+        key = label_m.group(0).lstrip('\\label{').rstrip('}')  # full label key
+        idx = md_source.find(key)
+        if idx != -1:
+            snippet = md_source[max(0, idx - 200): idx + 200]
+            for pattern, env in _CONTENT_HINTS:
+                if pattern.search(snippet):
+                    return env
+
+    return None
+
+
+def _fix_mismatched_envs(tex: str, md_source: str = "") -> str:
+    """Fix mismatched \\begin{X} ... \\end{Y} pairs.
+
+    For each mismatch, determine the correct env name by:
+    1. Validity: if only one of X/Y is in _VALID_ENVS, trust the valid one.
+    2. Content inference: \\label prefix, then keyword hints in the body.
+    3. Markdown fallback: search md_source for the label key context.
+    4. Last resort: trust \\begin{X} (original behavior).
+
+    Both \\begin and \\end positions are tracked so either side can be fixed.
+    """
+    begin_re = re.compile(r'\\begin\{([A-Za-z][A-Za-z0-9\-\*]*)\}')
+    end_re   = re.compile(r'\\end\{([A-Za-z][A-Za-z0-9\-\*]*)\}')
+
+    tokens: list[tuple[int, int, str, str]] = []
+    for m in begin_re.finditer(tex):
+        tokens.append((m.start(), m.end(), 'begin', m.group(1)))
+    for m in end_re.finditer(tex):
+        tokens.append((m.start(), m.end(), 'end', m.group(1)))
+    tokens.sort(key=lambda t: t[0])
+
+    # Stack stores (envname, token_start, token_end) so we can fix either side
+    stack: list[tuple[str, int, int]] = []
+    replacements: list[tuple[int, int, str]] = []
+
+    for start, end, kind, envname in tokens:
+        if kind == 'begin':
+            stack.append((envname, start, end))
+            continue
+
+        # \end token
+        if not stack:
+            continue  # stray \end — leave as-is
+
+        top_name, top_start, top_end = stack[-1]
+        stack.pop()
+
+        if top_name == envname:
+            continue  # matched — nothing to do
+
+        # Mismatch: determine correct env name
+        top_valid = top_name in _VALID_ENVS
+        cur_valid = envname in _VALID_ENVS
+        content_between = tex[top_end:start]
+
+        if top_valid and not cur_valid:
+            correct = top_name          # \end{Y} is the typo
+        elif cur_valid and not top_valid:
+            correct = envname           # \begin{X} is the typo
+        else:
+            inferred = _infer_env_name(content_between, md_source)
+            correct = inferred if inferred else top_name  # fallback: trust begin
+
+        if top_name != correct:
+            replacements.append((top_start, top_end, f'\\begin{{{correct}}}'))
+        if envname != correct:
+            replacements.append((start, end, f'\\end{{{correct}}}'))
+
+    if not replacements:
+        return tex
+
+    result = list(tex)
+    for s, e, new_text in sorted(replacements, key=lambda x: x[0], reverse=True):
+        result[s:e] = list(new_text)
+    return "".join(result)
 
 
 # Valid LaTeX environment names (built-in + amsthm standard set)
@@ -227,87 +386,99 @@ _LATEX_REVIEW_CHECKLIST = (
 )
 
 
-_REVIEW_ROUNDS = 3
+# ── 合并审查 Agent ────────────────────────────────────────────────
+# Single agent covering syntax + math + citations in one LLM call.
 
-# ── 专项检查 agent 定义 ──────────────────────────────────────────
-# Each agent has a focused system prompt and a targeted user prompt template.
-# They run in sequence; each receives the output of the previous one.
+_REVIEW_SYSTEM = (
+    "你是 LaTeX 全面修复专家。一次性修正以下所有问题，不改变任何实质内容：\n"
+    "\n【语法】\n"
+    "1. \\begin{env}/\\end{env} 缺反斜杠 → 补上\n"
+    "2. \\begin env（缺花括号）→ 改为 \\begin{env}\n"
+    "3. 环境名缩写 → 完整名：thm→theorem, lem→lemma, cor→corollary, "
+    "prop→proposition, defn/def→definition, rmk/rem→remark, "
+    "pf→proof, ex/exm→example, conj→conjecture, soln/sol→solution\n"
+    "4. \\section[x] 等必选参数误用 [] → 改为 {}\n"
+    "5. bibitem/label/ref/cite/item 缺反斜杠 → 补上\n"
+    "\n【数学】\n"
+    "6. 裸露数学符号（x^2, \\alpha, \\sum 等）→ 用 $...$ 包裹\n"
+    "7. 行间公式 $$...$$ → 改为 \\[...\\] 或 equation 环境\n"
+    "8. 正文特殊字符 % # & _ ^ ~ 未转义 → 补反斜杠（数学环境内除外）\n"
+    "\n【引用】\n"
+    "9. \\cite{key} 无对应 \\bibitem{key} → 补充 \\bibitem\n"
+    "10. \\ref{key} 无对应 \\label{key} → 补充 \\label 或改为文字\n"
+    "11. 禁止新增 \\newtheorem 或 \\theoremstyle，未定义环境名改写为标准名\n"
+    "\n【begin/end 配对】\n"
+    "12. \\begin{X} 必须与 \\end{X} 配对，环境名完全一致 → 不一致时修正 \\end 的环境名\n"
+    "    例：\\begin{lemma}...\\end{remark} → \\begin{lemma}...\\end{lemma}\n"
+    "    例：\\begin{theorem}...\\end{proof} → \\begin{theorem}...\\end{theorem}\n"
+    "\n只输出修正后的完整 LaTeX 片段，不要任何说明文字。"
+)
 
-_REVIEW_AGENTS = [
-    {
-        "name": "语法Agent",
-        "system": (
-            "你是 LaTeX 语法修复专家，只负责修正以下问题，不改变任何实质内容：\n"
-            "1. \\begin{env}/\\end{env} 缺反斜杠 → 补上反斜杠\n"
-            "2. \\begin env（缺花括号）→ 改为 \\begin{env}\n"
-            "3. 环境名缩写 → 完整名：thm→theorem, lem→lemma, cor→corollary, "
-            "prop→proposition, defn/def→definition, rmk/rem→remark, "
-            "pf→proof, ex/exm→example, conj→conjecture, soln/sol→solution\n"
-            "4. \\section[x] 等必选参数误用 [] → 改为 {}\n"
-            "5. bibitem{key}（缺反斜杠）→ \\bibitem{key}\n"
-            "只输出修正后的完整 LaTeX 片段，不要任何说明文字。"
-        ),
-        "user_tmpl": (
-            "请修正以下 LaTeX 片段中的语法错误（反斜杠/花括号/环境名缩写/[]vs{}）：\n\n"
-            "{body}\n\n只输出修正后的完整片段。"
-        ),
-    },
-    {
-        "name": "数学Agent",
-        "system": (
-            "你是 LaTeX 数学公式修复专家，只负责修正以下问题，不改变任何实质内容：\n"
-            "1. 裸露的数学符号（如 x^2, \\alpha, \\sum 等）未用 $...$ 包裹 → 补上 $\n"
-            "2. 行间公式应用 \\[...\\] 或 equation/align 环境，不要用 $$...$$\n"
-            "3. align/gather/equation 环境内的 & 对齐符号是否正确\n"
-            "4. 裸露的特殊字符 % # & _ ^ ~ 未转义 → 补上反斜杠（数学环境内除外）\n"
-            "只输出修正后的完整 LaTeX 片段，不要任何说明文字。"
-        ),
-        "user_tmpl": (
-            "请修正以下 LaTeX 片段中的数学公式问题（裸露符号/$$用法/特殊字符转义）：\n\n"
-            "{body}\n\n只输出修正后的完整片段。"
-        ),
-    },
-    {
-        "name": "引用Agent",
-        "system": (
-            "你是 LaTeX 引用完整性修复专家，只负责修正以下问题，不改变任何实质内容：\n"
-            "1. \\cite{key} 在 thebibliography 中没有对应 \\bibitem{key} → 补充 \\bibitem\n"
-            "2. \\ref{key} 没有对应 \\label{key} → 补充 \\label 或将 \\ref 改为文字\n"
-            "3. \\bibitem 条目格式：\\bibitem{key} 作者. 标题. 期刊, 年份.\n"
-            "4. 禁止新增 \\newtheorem 或 \\theoremstyle，未定义环境名改写为标准名\n"
-            "只输出修正后的完整 LaTeX 片段，不要任何说明文字。"
-        ),
-        "user_tmpl": (
-            "请修正以下 LaTeX 片段中的引用问题（\\cite/\\ref/\\bibitem 配对，未定义环境名）：\n\n"
-            "{body}\n\n只输出修正后的完整片段。"
-        ),
-    },
+_REVIEW_USER_TMPL = (
+    "请一次性修正以下 LaTeX 片段中的所有问题（语法/数学/引用）：\n\n"
+    "{body}\n\n只输出修正后的完整片段。"
+)
+
+
+# ── 条件触发：只有检测到可疑模式才调 LLM ────────────────────────
+
+_REVIEW_TRIGGERS = [
+    re.compile(r'(?<!\\)\b(begin|end)\{',          re.IGNORECASE),  # 裸露 begin/end
+    re.compile(r'\$\$'),                                              # $$ 用法
+    re.compile(r'(?<!\\)\b(bibitem|label|ref|cite|item)\b'),         # 缺反斜杠关键字
+    re.compile(r'(?<!\\)\b(alpha|beta|gamma|delta|theta|lambda|mu|nu|xi|pi|sigma|tau|phi|psi|omega'
+               r'|sum|int|prod|frac|sqrt|infty|partial|nabla|forall|exists)\b'),  # 裸露数学符号
+    re.compile(r'(?<!\$)(?<!\{)(?<!\\)[_^](?!\{)'),                 # 裸露 _ ^
 ]
+
+def _has_env_mismatch(tex: str) -> bool:
+    """Return True if any \\begin{X}/\\end{Y} pair has mismatched env names."""
+    begin_re = re.compile(r'\\begin\{([A-Za-z][A-Za-z0-9\-\*]*)\}')
+    end_re   = re.compile(r'\\end\{([A-Za-z][A-Za-z0-9\-\*]*)\}')
+    tokens = []
+    for m in begin_re.finditer(tex):
+        tokens.append((m.start(), 'begin', m.group(1)))
+    for m in end_re.finditer(tex):
+        tokens.append((m.start(), 'end', m.group(1)))
+    tokens.sort(key=lambda t: t[0])
+    stack: list[str] = []
+    for _, kind, name in tokens:
+        if kind == 'begin':
+            stack.append(name)
+        elif stack:
+            if stack[-1] != name:
+                return True
+            stack.pop()
+    return False
+
+def _needs_review(tex: str) -> bool:
+    """Return True if any suspicious pattern is found that warrants LLM review."""
+    for pattern in _REVIEW_TRIGGERS:
+        if pattern.search(tex):
+            return True
+    return _has_env_mismatch(tex)
 
 
 def _review_latex(model_name: str, style_hint: str, latex_body: str,
                   extra_checks: str = "") -> str:
-    """Run 3 rounds of 3 focused review agents on a LaTeX fragment.
+    """Single-pass review: skip if clean, one LLM call if issues detected."""
+    if not _needs_review(latex_body):
+        print("    [Review] 无可疑模式，跳过 LLM 审查", flush=True)
+        return latex_body
 
-    Round structure: syntax → math → citations, repeated _REVIEW_ROUNDS times.
-    Each agent receives the output of the previous one.
-    Programmatic fixes applied after every agent call.
-    """
-    body = latex_body
-    for round_no in range(1, _REVIEW_ROUNDS + 1):
-        for agent in _REVIEW_AGENTS:
-            print(f"    [Review {round_no}/{_REVIEW_ROUNDS}] {agent['name']} 审查中...", flush=True)
-            user = agent["user_tmpl"].replace("{body}", body)
-            result = call_llm(model_name, agent["system"], user, temperature=0.1,
-                              show_thinking=True)
-            # Strip markdown fences if LLM wraps output
-            result = re.sub(r'^```(?:latex)?\s*\n', '', result.strip(), flags=re.MULTILINE)
-            result = re.sub(r'\n```\s*$', '', result.strip())
-            if result:
-                body = _fix_latex_envs(result)
-            print(f"    [Review {round_no}/{_REVIEW_ROUNDS}] {agent['name']} 完成", flush=True)
-        print(f"  [Review Round {round_no}/{_REVIEW_ROUNDS}] 全部 Agent 完成", flush=True)
-    return body
+    print("    [Review] 检测到可疑模式，启动审查...", flush=True)
+    user = _REVIEW_USER_TMPL.replace("{body}", latex_body)
+    if extra_checks:
+        user += f"\n\n额外检查项：\n{extra_checks}"
+    result = call_llm(model_name, _REVIEW_SYSTEM, user, temperature=0.1, show_thinking=True)
+    result = re.sub(r'^```(?:latex)?\s*\n', '', result.strip(), flags=re.MULTILINE)
+    result = re.sub(r'\n```\s*$', '', result.strip())
+    if result:
+        body = _fix_latex_envs(result)
+        print("    [Review] 完成", flush=True)
+        return body
+    return latex_body
+
 
 
 def _extract_json(raw: str):
@@ -415,6 +586,11 @@ _LATEX_ENV_RULES = (
     r"- 每个 \cite{key} 必须在 thebibliography 中有对应的 \bibitem{key}" "\n"
     r"- 每个 \ref{key} 必须有对应的 \label{key}" "\n"
     r"- \label、\ref、\cite 均须有反斜杠前缀" "\n"
+    "\n【begin/end 配对（严格执行）】\n"
+    r"- \begin{X} 必须与 \end{X} 配对，环境名必须完全一致" "\n"
+    r"- 禁止 \begin{lemma}...\end{remark}、\begin{theorem}...\end{proof} 等错误配对" "\n"
+    r"- 每个 \begin{X} 必须有且仅有一个对应的 \end{X}，不得多余也不得缺失" "\n"
+    r"- 正确示例：\begin{lemma} ... \end{lemma}，\begin{remark} ... \end{remark}" "\n"
     "\n【禁止新增 \\newtheorem】\n"
     "- 严禁在输出中新增任何 \\newtheorem 或 \\theoremstyle 定义\n"
     "- 若遇到非标准环境名（如 maintheorem、lemm、cor-kirillov），直接改写为对应标准名\n"
@@ -521,7 +697,7 @@ def paper_writer_node(state: PipelineState) -> dict:
     latex_body = call_llm(state["model_name"], system, user, temperature=0.2)
     latex_body = re.sub(r'<think>.*?</think>', '', latex_body, flags=re.DOTALL)
     latex_body = re.sub(r'&lt;/?think&gt;', '', latex_body, flags=re.IGNORECASE)
-    latex_body = _fix_latex_envs(latex_body)
+    latex_body = _fix_latex_envs(latex_body, md_source=full_text)
 
     print(f"  [Paper] 格式审查...")
     original_before_review = latex_body
@@ -672,7 +848,7 @@ def chapter_writer_node(state: WriterInput) -> dict:
     latex_body = call_llm(state["model_name"], system, user, temperature=0.2)
     latex_body = re.sub(r'<think>.*?</think>', '', latex_body, flags=re.DOTALL)
     latex_body = re.sub(r'&lt;/?think&gt;', '', latex_body, flags=re.IGNORECASE)
-    latex_body = _fix_latex_envs(latex_body)
+    latex_body = _fix_latex_envs(latex_body, md_source=content)
 
     output_dir = Path(state["output_dir"])
     sub_path = output_dir / f"chapter-{ch['index']}.tex"
@@ -685,26 +861,102 @@ def chapter_writer_node(state: WriterInput) -> dict:
 # ── Step 4: Retriever ─────────────────────────────────────────
 
 def retriever_node(state: PipelineState) -> dict:
-    print(f"\n[Step 4] Retriever 检查格式一致性")
+    chapters = sorted(state["chapter_outputs"], key=lambda x: x["index"])
+    print(f"\n[Step 4] Retriever 并行审查 {len(chapters)} 个章节", flush=True)
     tpl = TEMPLATES[state["template_name"]]
-    reviewed = []
+    model_name = state["model_name"]
+    output_dir = Path(state["output_dir"])
+    reviewed_map: dict[int, dict] = {}
 
-    for ch in sorted(state["chapter_outputs"], key=lambda x: x["index"]):
-        print(f"  检查 #{ch['index']}: {ch['title']}")
+    def _review_chapter(ch: dict) -> dict:
+        print(f"  [#{ch['index']}] 开始审查: {ch['title']}", flush=True)
         extra = (
             f"□ 章节层级是否用了 \\section / \\subsection？\n"
             f"□ 末尾是否有 % === END CHAPTER {ch['index']} ===？\n"
         )
-        reviewed_body = _review_latex(
-            state["model_name"], tpl["style_hint"], ch["latex_body"], extra_checks=extra
-        )
-        learn_from_review(ch["latex_body"], reviewed_body, state["model_name"])
-        reviewed.append({**ch, "latex_body": reviewed_body})
-
-        sub_path = Path(state["output_dir"]) / f"chapter-{ch['index']}-reviewed.tex"
+        reviewed_body = _review_latex(model_name, tpl["style_hint"], ch["latex_body"],
+                                      extra_checks=extra)
+        learn_from_review(ch["latex_body"], reviewed_body, model_name)
+        sub_path = output_dir / f"chapter-{ch['index']}-reviewed.tex"
         sub_path.write_text(reviewed_body, encoding="utf-8")
+        print(f"  [#{ch['index']}] 审查完成: {ch['title']}", flush=True)
+        return {**ch, "latex_body": reviewed_body}
 
+    max_workers = min(len(chapters), 4)
+    with ThreadPoolExecutor(max_workers=max_workers) as pool:
+        futures = {pool.submit(_review_chapter, ch): ch["index"] for ch in chapters}
+        for fut in as_completed(futures):
+            result = fut.result()
+            reviewed_map[result["index"]] = result
+
+    reviewed = [reviewed_map[ch["index"]] for ch in chapters]
     return {"reviewed_outputs": reviewed}
+
+
+from .cite_tool import search_crossref, search_arxiv, format_bibitem, extract_citations, extract_bibitems
+
+
+# ── Step 4b: Reference Manager ────────────────────────────────
+
+def ref_manager_node(state: PipelineState) -> dict:
+    print(f"\n[Step 4b] Reference Manager 自动补全参考文献")
+    output_dir = Path(state["output_dir"])
+    
+    # 汇总所有章节的 LaTeX
+    combined_latex = ""
+    for ch in state["chapter_outputs"]:
+        combined_latex += ch["latex_body"] + "\n"
+    
+    # 1. 提取所有 \cite 过的 keys
+    cite_keys = extract_citations(combined_latex)
+    # 2. 提取已有的 \bibitem
+    existing_bibs = extract_bibitems(combined_latex)
+    
+    all_keys = sorted(list(set(cite_keys) | set(existing_bibs.keys())))
+    print(f"  识别到 {len(all_keys)} 条文献引用")
+    
+    final_bibitems = []
+    for key in all_keys:
+        # 如果已经有详细信息（非空），先尝试用已有信息
+        info = existing_bibs.get(key, "").strip()
+        
+        # 逻辑：如果信息少于 10 个字符，认为是缺失信息，去联网找
+        if len(info) < 10:
+            print(f"    检索 {key} ...", end="", flush=True)
+            # 改进查询构造：尝试将 CamelCase 或 紧凑格式 拆分开
+            # 比如 GaoXiong2025 -> Gao Xiong 2025
+            query = re.sub(r'([a-z])([A-Z])', r'\1 \2', key)
+            query = re.sub(r'([A-Za-z])([0-9])', r'\1 \2', query)
+            query = re.sub(r'([0-9])([A-Z])', r'\1 \2', query)
+            query = query.replace("-", " ").replace("_", " ")
+            
+            # 第一步：搜 CrossRef
+            res = search_crossref(query)
+            # 第二步：如果 CrossRef 没结果，搜 arXiv
+            if not res:
+                res = search_arxiv(query)
+                
+            if res:
+                formatted = format_bibitem(key, res)
+                final_bibitems.append(formatted)
+                source = "CrossRef" if "doi" in formatted.lower() else "arXiv"
+                print(f" [✓ {source}]")
+            else:
+                final_bibitems.append(f"\\bibitem{{{key}}} {info if info else 'TODO: Missing reference data'}")
+                print(" [✗ 未找到]")
+        else:
+            final_bibitems.append(f"\\bibitem{{{key}}} {info}")
+
+    # 生成 bib.tex
+    bib_content = "\\begin{thebibliography}{99}\n"
+    bib_content += "\n".join(final_bibitems)
+    bib_content += "\n\\end{thebibliography}"
+    
+    bib_path = output_dir / "bib.tex"
+    bib_path.write_text(bib_content, encoding="utf-8")
+    print(f"  ✓ 生成 {bib_path.name}")
+    
+    return {}
 
 
 # ── Step 5: Assembler ─────────────────────────────────────────
@@ -723,6 +975,11 @@ def assembler_node(state: PipelineState) -> dict:
         body_parts.append(ch["latex_body"])
         body_parts.append("\n")
     full_body = "\n".join(body_parts)
+    
+    # 如果有 bib.tex，在 body 结尾包含它
+    bib_path = output_dir / "bib.tex"
+    if bib_path.exists():
+        full_body += "\n\\input{bib}\n"
 
     preamble = tpl["preamble"].replace("__TITLE__", state["doc_title"])
     document = tpl["body_wrapper"].replace("__BODY__", full_body)
