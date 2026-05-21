@@ -85,7 +85,7 @@ __BODY__
 ```
 
 ## Output Files
-- `output/<stem>/mineru_output/` — MinerU transcription output (cached automatically).
+- `output/<stem>/<stem>.md`       — MinerU transcription output (cached automatically).
 - `output/<stem>/snippets/`      — Individual chapter tex files.
 - `output/<stem>/reviewed_snippets/` — Snippets reviewed by the Retriever.
 - `output/<stem>/main.tex`       — Merged version (compile directly).

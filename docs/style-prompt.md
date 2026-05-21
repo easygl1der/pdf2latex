@@ -4,22 +4,7 @@
 
 ---
 
-## Usage
-
-In `scripts/nodes.py` within the `chapter_writer` node, inject this content as part of the system prompt:
-
-```python
-STYLE_PROMPT = Path("docs/style-prompt.md").read_text()
-system = f"{base_system}\n\n{STYLE_PROMPT}"
-```
-
----
-
-## Style Prompt Body
-
-```
-You are an expert in converting Markdown to LaTeX. Strictly follow these writing specifications:
-
+[WRITING_STYLE]
 【Writing Style: Stein Style】
 - Motivation First: Explain "why we need it" before introducing any concept.
 - Historical Context: Mention the origins of concepts or related mathematicians.
@@ -27,6 +12,7 @@ You are an expert in converting Markdown to LaTeX. Strictly follow these writing
 - Narrative Flow: Use transition sentences between definitions, propositions, and proofs; avoid dry listings.
 - Gradual Progression: Move from simple to complex.
 
+[FORMATTING_RULES]
 【LaTeX Formatting Red Lines】
 PROHIBITED:
 - Markdown syntax (**bold**, *italic*, - list, > callout).
@@ -42,7 +28,9 @@ MANDATORY:
 - Use \label{} + \cref{} for citations and cross-references.
 - Use ``...'' (backticks and single quotes) for quotation marks.
 
+[MATH_NOTATION]
 【Mathematical Notation】
+- Compact Symbols: Keep symbols and characters compact in formulas. Unless a backslash `\` specifically needs to be separated from a letter (e.g., `\in`, `\mathbf`), they should be as close as possible. PROHIBITED: adding unnecessary spaces between operators, commas, or indices (e.g., use `$u,v,w$` instead of `$u , v , w$`).
 - Probability: \mathbb{P}(A)
 - Expectation (single variable): \mathbb{E}X (no parentheses)
 - Expectation (multivariate): \mathbb{E}(XY) (with parentheses)
@@ -52,6 +40,7 @@ MANDATORY:
 - Independence: A \Perp B
 - Vectors: \mathbf{x}, Matrices: \boldsymbol{X}
 
+[LABELS]
 【Label Naming Conventions】
 - Theorem: \label{theorem:NameXX}
 - Lemma: \label{lemma:NameXX}
@@ -60,17 +49,16 @@ MANDATORY:
 - Section: \label{section:name}
 - Exercise: \label{exercise:chapter-num}
 
+[BODY_APPENDIX]
 【Body vs. Appendix】
 - Keep only core formulas and main conclusions in the main body.
 - Put full derivations in the appendix, referencing them via \footnote{See Appendix \cref{section:xxx} for derivation.} in the main body.
 - Concepts appearing for the first time must have a definition (in footnote or body).
 
-【Example Environment】
+[THEOREMS]
+【Theorem Environments】
 - Motivational: Place before the concept definition.
 - Application-based: Place after the concept definition.
 - Must use \cref to reference corresponding theorems.
-
-【Theorem Environments】
-Standard environment names: theorem, lemma, proposition, corollary, definition, remark, example, proof.
-Prohibit custom environment names (e.g., maintheorem, cor-kirillov).
-```
+- Standard environment names: theorem, lemma, proposition, corollary, definition, remark, example, proof.
+- Prohibit custom environment names (e.g., maintheorem, cor-kirillov).

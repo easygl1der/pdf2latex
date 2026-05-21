@@ -8,7 +8,7 @@ import os
 import sys
 from pathlib import Path
 
-from scripts.config import TEMPLATES, MINERU_API_KEY, OPENAI_API_KEY
+from scripts.config import TEMPLATES, MODELS, MINERU_API_KEY, OPENAI_API_KEY
 from scripts.mineru_convert_wrapper import mineru_convert_to_md
 from scripts.pipeline import build_graph
 
@@ -33,10 +33,11 @@ def main():
     parser.add_argument("pdf", help="Input PDF path")
     parser.add_argument("--template", choices=list(TEMPLATES.keys()),
                         default="amsart", help="LaTeX template (default: amsart)")
-    parser.add_argument("--model", choices=["openai", "ollama"],
-                        default="ollama", help="LLM selection (default: ollama)")
-    parser.add_argument("--mode", choices=["notes", "original"],
-                        default="notes", help="Conversion mode: notes (Learning Notes) | original (Fidelity)")
+    parser.add_argument("--model", choices=list(MODELS.keys()),
+                        default="ollama", help=f"LLM selection (default: ollama). Available: {', '.join(MODELS.keys())}")
+    parser.add_argument("--custom-model", help="Specify a custom model name for the selected provider (e.g. --model ollama --custom-model deepseek-v3)")
+    parser.add_argument("--mode", choices=["habit", "original"],
+                        default="original", help="Conversion mode: habit (Your Writing Habits/Stein Style) | original (Strict Reproduction, Default)")
     parser.add_argument("--list-templates", action="store_true", help="List all available templates")
     args = parser.parse_args()
 
@@ -47,6 +48,11 @@ def main():
         return
 
     check_keys(args.model)
+
+    # Allow overriding the model string in the selected provider
+    if args.custom_model:
+        MODELS[args.model]["model"] = args.custom_model
+        print(f"  [Config] Overriding {args.model} provider with custom model: {args.custom_model}")
 
     pdf_path = Path(args.pdf)
     if not pdf_path.exists():
@@ -64,7 +70,7 @@ def main():
     print(f"\n[Step 0] MinerU Transcription")
     output_root = Path("output")
     cache_dir = output_root / pdf_path.stem
-    cache_file = cache_dir / "mineru_output" / f"{pdf_path.stem}.md"
+    cache_file = cache_dir / f"{pdf_path.stem}.md"
 
     if cache_file.exists():
         print(f"  [Cache Hit] Skipping API call, reading {cache_file}")

@@ -23,28 +23,49 @@ def get_client(model_name: str) -> tuple:
 def call_llm(model_name: str, system: str, user: str, temperature: float = 0.3,
              show_thinking: bool = False) -> str:
     client, model, max_tokens = get_client(model_name)
+    
+    messages = [
+        {"role": "system", "content": system},
+        {"role": "user",   "content": user}
+    ]
+    
+    full_response = []
+    
+    while True:
+        stream = client.chat.completions.create(
+            model=model,
+            messages=messages,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            stream=True,
+        )
 
-    # Note: Nemotron-3-Super natively expects a prompt structure.
-    # We pass it as standard chat messages here.
-    stream = client.chat.completions.create(
-        model=model,
-        messages=[{"role": "system", "content": system},
-                  {"role": "user",   "content": user}],
-        temperature=temperature,
-        max_tokens=max_tokens,
-        stream=True,
-    )
+        current_turn_buf = []
+        finish_reason = None
 
-    raw_buf = []
+        for chunk in stream:
+            if not chunk.choices:
+                continue
+            
+            delta = chunk.choices[0].delta
+            finish_reason = chunk.choices[0].finish_reason
+            
+            piece = delta.content or ""
+            if piece:
+                current_turn_buf.append(piece)
+                print(piece, end="", flush=True)
 
-    for chunk in stream:
-        if not chunk.choices:
-            continue
-        piece = chunk.choices[0].delta.content or ""
-        if not piece:
-            continue
-        raw_buf.append(piece)
-        print(piece, end="", flush=True)
+        full_response.extend(current_turn_buf)
+        
+        # If the model stopped because of length, we need to continue
+        if finish_reason == "length":
+            print("\n[Output Truncated] Requesting continuation...", flush=True)
+            # Add the partial response as an assistant message
+            messages.append({"role": "assistant", "content": "".join(current_turn_buf)})
+            # Add a prompt to continue
+            messages.append({"role": "user", "content": "Your previous response was truncated. Please continue exactly from where you left off. Do not repeat the preamble or any previous parts. Just continue the LaTeX code."})
+        else:
+            break
 
     print("\n", flush=True)
-    return "".join(raw_buf)
+    return "".join(full_response)
