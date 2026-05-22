@@ -1,5 +1,6 @@
 """
-Minimal LangGraph Nodes for pdf2latex with Surgical Repair Loop
+Lite LangGraph Nodes for pdf2latex
+Simplified for direct conversion without complex repair loops.
 """
 import re
 import subprocess
@@ -7,7 +8,6 @@ from pathlib import Path
 from langgraph.types import Send
 from .config import TEMPLATES, OUTPUT_ROOT, PipelineState, WriterInput
 from .llm import call_llm
-from .error_memory import build_memory_prompt, summarize_fixes
 
 def _clean_res(res: str) -> str:
     """Remove code blocks and extra whitespace."""
@@ -25,7 +25,6 @@ def classifier_node(state: PipelineState) -> dict:
     res = call_llm(state["model_name"], "Is this a 'book' or a 'paper'? Output one word only.", sample, temperature=0, show_thinking=False)
     doc_type = "paper" if "paper" in res.lower() else "book"
     
-    # User Requirement: Paper -> amsart, Book -> article
     tpl = "amsart" if doc_type == "paper" else "article"
     print(f"  - Classified as: {doc_type} -> Default Template: {tpl}")
     
@@ -75,14 +74,8 @@ def paper_writer_node(state: PipelineState) -> dict:
     p.write_text(final, encoding="utf-8")
     return {"final_latex": str(p)}
 
-def retriever_node(state: PipelineState) -> dict:
-    print("\n[Step 4] Retriever")
-    for ch in state["chapter_outputs"]:
-        ch["latex_body"] = _clean_res(call_llm(state["model_name"], "Fix LaTeX formatting errors in this code.", ch["latex_body"]))
-    return {"chapter_outputs": state["chapter_outputs"]}
-
 def assembler_node(state: PipelineState) -> dict:
-    print("\n[Step 5] Assembler")
+    print("\n[Step 4] Assembler")
     tpl = TEMPLATES[state["template_name"]]
     sorted_ch = sorted(state["chapter_outputs"], key=lambda x: x["index"])
     body = "\n".join(c["latex_body"] for c in sorted_ch)
@@ -92,86 +85,27 @@ def assembler_node(state: PipelineState) -> dict:
     p.write_text(final, encoding="utf-8")
     return {"final_latex": str(p)}
 
-# ═══════════════════════════════════════════════════════════════
-# Compiler with Surgical Repair
-# ═══════════════════════════════════════════════════════════════
-
-def _parse_latex_log(log_path: Path, source_text: str) -> list[dict]:
-    """Extract errors with line numbers and find lines for citations."""
-    if not log_path.exists(): return []
-    log_content = log_path.read_text(encoding="utf-8", errors="ignore")
-    lines = source_text.splitlines()
-    issues = []
-    
-    # 1. Standard Error Pattern: main.tex:123: Message
-    for m in re.finditer(r'(?:\./)?\S+\.tex:(\d+):\s*(.+)', log_content):
-        issues.append({"line": int(m.group(1)), "msg": m.group(2).strip()})
-        
-    # 2. Citations (Search for the \cite{key} in source to find the line)
-    if "Citation" in log_content and "undefined" in log_content:
-        for m in re.finditer(r"Citation `([^']+)' on page \d+ undefined", log_content):
-            key = m.group(1)
-            # Find which line contains this cite key
-            for i, line in enumerate(lines):
-                if f"\\cite{{{key}}}" in line or f"\\cite{{ {key}" in line: # simple search
-                    issues.append({"line": i + 1, "msg": f"Undefined citation '{key}'"})
-                    break
-
-    # 3. References (Search for \ref{key})
-    if "Reference" in log_content and "undefined" in log_content:
-        for m in re.finditer(r"Reference `([^']+)' on page \d+ undefined", log_content):
-            key = m.group(1)
-            for i, line in enumerate(lines):
-                if f"\\ref{{{key}}}" in line:
-                    issues.append({"line": i + 1, "msg": f"Undefined reference '{key}'"})
-                    break
-
-    return issues[:5]
-
 def compiler_node(state: PipelineState) -> dict:
-    print(f"\n[Step 6] Compiler (Line-Focused Surgical Repair)")
+    print(f"\n[Step 5] Compiler (Lite)")
     p = Path(state["final_latex"])
-    model = state["model_name"]
-    xelatex_cmd = ["xelatex", "-interaction=nonstopmode", "-synctex=1", "-halt-on-error", p.name]
-    
-    for r in range(1, 4):
-        print(f"  [Round {r}] Compiling...")
-        subprocess.run(xelatex_cmd, cwd=p.parent, capture_output=True)
-        
-        # Check for BibTeX on first round
-        aux = p.with_suffix(".aux")
-        if r == 1 and aux.exists() and "\\citation" in aux.read_text(encoding="utf-8", errors="ignore"):
-            print("  - Running BibTeX...")
-            subprocess.run(["bibtex", p.stem], cwd=p.parent, capture_output=True)
-            subprocess.run(xelatex_cmd, cwd=p.parent, capture_output=True)
-        
-        source_text = p.read_text(encoding="utf-8")
-        issues = _parse_latex_log(p.with_suffix(".log"), source_text)
-        
-        if not issues:
-            print("  ✓ Success: No line-specific errors found.")
-            break
-            
-        print(f"  Fixing {len(issues)} issues at specific lines...")
-        source_lines = source_text.splitlines()
-        memory = build_memory_prompt()
-        
-        for issue in issues:
-            ln = issue["line"]
-            if 0 < ln <= len(source_lines):
-                idx = ln - 1
-                # Small window (2 lines before/after)
-                start, end = max(0, idx-2), min(len(source_lines), idx+3)
-                context = "\n".join(source_lines[start:end])
-                
-                print(f"    - Repairing line {ln}: {issue['msg'][:50]}")
-                system = f"Fix the technical LaTeX error in this snippet. Ignore fonts/styling. Output ONLY fixed code.\n{memory}"
-                user = f"Error at line {ln}: {issue['msg']}\nSnippet:\n{context}"
-                
-                fixed = _clean_res(call_llm(model, system, user))
-                source_lines[start:end] = fixed.splitlines()
-                summarize_fixes([{"message": issue["msg"]}], context, fixed, model)
-                
-        p.write_text("\n".join(source_lines), encoding="utf-8")
-        
+    xelatex_cmd = ["xelatex", "-interaction=nonstopmode", "-halt-on-error", p.name]
+    print(f"  Compiling {p.name}...")
+    subprocess.run(xelatex_cmd, cwd=p.parent, capture_output=True)
     return {}
+
+if __name__ == "__main__":
+    import sys
+    if len(sys.argv) > 1:
+        # Simple test: python scripts/nodes.py test.md
+        md_path = sys.argv[1]
+        if Path(md_path).exists():
+            print(f"Testing nodes.py with {md_path}...")
+            content = Path(md_path).read_text(encoding="utf-8")
+            # Mocking some calls for a direct test
+            print("Cleaning content...")
+            print(_clean_res("```latex\n" + content + "\n```"))
+        else:
+            print(f"File not found: {md_path}")
+    else:
+        print("pdf2latex Lite Nodes - Module loaded.")
+        print("Usage for testing: python scripts/nodes.py sample.md")

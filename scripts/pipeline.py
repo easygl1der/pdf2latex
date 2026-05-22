@@ -1,5 +1,5 @@
 """
-LangGraph Pipeline Construction
+LangGraph Pipeline Construction (Lite)
 """
 
 from langgraph.graph import StateGraph, END, START
@@ -8,7 +8,6 @@ from .config import PipelineState
 from .nodes import (
     classifier_node, route_by_doc_type,
     supervisor_node, dispatch_chapters, chapter_writer_node,
-    retriever_node,
     assembler_node,
     paper_writer_node,
     compiler_node,
@@ -21,7 +20,6 @@ def build_graph():
     g.add_node("classifier",     classifier_node)
     g.add_node("supervisor",     supervisor_node)
     g.add_node("chapter_writer", chapter_writer_node)
-    g.add_node("retriever",      retriever_node)
     g.add_node("assembler",      assembler_node)
     g.add_node("paper_writer",   paper_writer_node)
     g.add_node("compiler",       compiler_node)
@@ -31,8 +29,7 @@ def build_graph():
 
     # Book path
     g.add_conditional_edges("supervisor", dispatch_chapters, ["chapter_writer"])
-    g.add_edge("chapter_writer", "retriever")
-    g.add_edge("retriever", "assembler")
+    g.add_edge("chapter_writer", "assembler")
     g.add_edge("assembler", "compiler")
 
     # Paper path

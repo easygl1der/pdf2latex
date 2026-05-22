@@ -1,15 +1,13 @@
-# Project Instructions: pdf2latex
+# Project Instructions: pdf2latex (Lite)
 
 ## Core Mandates
 - **Language:** All code, comments, docstrings, and LLM prompts MUST be written in English.
-- **Conversion Engine:** Use `MinerUConverter` from `scripts/mineru_convert.py` for all PDF-to-Markdown conversions.
-- **Architecture:** Maintain the LangGraph-based pipeline for document structure analysis, chapter-wise LaTeX conversion, and final assembly.
-- **LLM Integration:** Use Ollama (Nemotron-3-Super) via the OpenAI-compatible interface for all reasoning tasks.
-- **Execution Rule:** Do NOT run `python main.py` directly inside the Gemini CLI. The user will run it externally.
+- **Conversion Engine:** Use `MinerUConverter` from `scripts/mineru_convert.py`.
+- **Execution Rule:** **DO NOT** run `python main.py` or any primary execution scripts inside the Gemini CLI. The user will handle all execution externally.
+- **Verification Rule:** Before proposing or finalizing code changes, perform a thorough **theoretical logic check**. Ensure the code is syntactically correct, handles paths properly, and follows the simplified architecture.
+- **Philosophy:** Keep it simple. Avoid over-engineering, complex repair loops, or excessive abstractions. Prioritize direct, readable, and maintainable code.
 
 ## Workflows
-1. **PDF Conversion:** Convert PDF to Markdown using MinerU cloud API. Handles large PDFs by splitting/merging.
-2. **Structure Analysis:** Use a supervisor node with thinking mode enabled to partition the document into chapters.
-3. **Parallel Processing:** Convert each chapter to LaTeX in parallel using specialized writer agents.
-4. **Validation:** Each LaTeX snippet must be reviewed by a retriever node for formatting correctness.
-5. **Assembly:** Final assembly into both single-file and modular LaTeX documents.
+1. **Simplified Pipeline:** Markdown -> Chapter Split -> LaTeX Conversion -> Assembly -> Simple Compilation.
+2. **Manual Handoff:** After updating code, confirm the changes are logically sound and wait for the user to run the script.
+3. **No Hidden Logic:** Ensure all processing steps are explicit in the nodes and easy to debug.
