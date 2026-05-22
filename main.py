@@ -111,8 +111,10 @@ def main():
             "1. REMOVE all CSS code, <style> tags, or inline style='...' attributes.\n"
             "2. STRIP HTML TAGS: Remove tags like <details>, <summary>, <div>, <span>. KEEP the meaningful text, code blocks, AND images inside them.\n"
             "3. COMPACT MATH: Ensure ZERO SPACES inside math formulas. Example: $a+b=c$ (NOT $a + b = c$).\n"
-            "4. UNICODE TO LATEX: Convert Unicode symbols (σ, α, β, Δ, ≈, ≠, ≤) to LaTeX commands ($\\sigma$, $\\alpha$, etc.) wrapped in $.\n"
-            "5. AGGRESSIVE WRAPPING: Wrap all plain-text variables like 'y=0' into '$y=0$'.\n"
+            "5. UNICODE TO LATEX: Convert Unicode symbols (σ, α, β, Δ, ≈, ≠, ≤) to LaTeX commands ($\\sigma$, $\\alpha$, etc.) wrapped in $.\n"
+            "6. CITATION PROTECTION: DO NOT wrap numeric citations like [18], [1-5], or [10, 12] in math delimiters. Keep them as plain text.\n"
+            "7. AGGRESSIVE WRAPPING: Wrap all plain-text variables like 'y=0' into '$y=0$'.\n"
+
             "6. PROOF QED: Ensure every 'Proof.' section ends with a '□' symbol.\n\n"
             "### OUTPUT:\n"
             "Output ONLY the cleaned Markdown text. If you delete an image tag, you have FAILED the mission."

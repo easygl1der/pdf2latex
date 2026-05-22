@@ -301,9 +301,13 @@ def chapter_writer_node(state: WriterInput) -> dict:
         f"   - EXAMPLE: Use $a+b=c$, NOT $a + b = c$.\n"
         f"   - EXAMPLE: Use $\\max_{{q}}\\mathcal{{L}}$, NOT $\\max _ {{q}} \\mathcal {{L}}$.\n"
         f"   - RULE: Zero spaces after \\sum, \\max, \\int, and around +, -, =, ^, _, {{, }}.\n"
-        f"2. NO \\begin{{array}}: Use 'aligned', 'cases', or 'matrix' environments for equations. Manual numbering like (7) is FORBIDDEN.\n"
-        f"3. DOCUMENT COMPLETENESS: Ensure all text from the source markdown is preserved.\n"
-        f"4. OUTPUT FORMAT: Return ONLY the LaTeX code inside a single code block."
+        f"2. EQUATION TAGGING: If a display math block ($$) contains a manual tag like (1), (2.1), etc., DO NOT use \\tag{{}}. Instead, use the \\begin{{equation}} environment with a \\label{{eq:number}}. \n"
+        f"   - EXAMPLE: $$ a+b=c \quad (1) $$ -> \\begin{{equation}} a+b=c \\label{{eq:1}} \\end{{equation}}\n"
+        f"3. CROSS-REFERENCES: Convert all plain-text references to equations (e.g., 'as seen in (1)') into proper LaTeX \\ref{{eq:1}} commands.\n"
+        f"4. NO \\begin{{array}}: Use 'aligned', 'cases', or 'matrix' environments for equations. Manual numbering like (7) is FORBIDDEN except when converted to structural labels.\n"
+        f"5. CITATIONS: Convert all plain-text citations like [18], [1, 2], or (Author, 2020) into proper LaTeX \\cite{{...}} commands.\n"
+        f"6. DOCUMENT COMPLETENESS: Ensure all text from the source markdown is preserved.\n"
+        f"7. OUTPUT FORMAT: Return ONLY the LaTeX code inside a single code block."
         )
 
     
@@ -336,6 +340,10 @@ def paper_writer_node(state: PipelineState) -> dict:
     system = (
         f"### ROLE: SENIOR LATEX TYPESETTING EXPERT\n"
         f"Convert the following Markdown to a FULL and COMPLETE LaTeX document for the {state['template_name']} style.\n\n"
+        f"### MANDATORY METADATA (USE EXACTLY THESE):\n"
+        f"- TITLE: {state['doc_title']}\n"
+        f"- AUTHOR: {state.get('doc_author', 'Anonymous')}\n"
+        f"- DATE: {state.get('doc_date', 'unknown')}\n\n"
         f"### TARGET TEMPLATE STRUCTURE:\n```latex\n{template_structure}\n```\n\n"
         f"### STYLE SPECIFICATIONS:\n{tpl['style_hint']}\n{style_prompt}\n\n"
         f"### VISUAL CONTEXT FOR IMAGES:\n{visual_context if visual_context else 'No image data available.'}\n\n"
@@ -344,10 +352,13 @@ def paper_writer_node(state: PipelineState) -> dict:
         f"   - EXAMPLE: Use $a+b=c$, NOT $a + b = c$.\n"
         f"   - EXAMPLE: Use $\\max_{{q}}\\mathcal{{L}}$, NOT $\\max _ {{q}} \\mathcal {{L}}$.\n"
         f"   - RULE: Zero spaces after \\sum, \\max, \\int, and around +, -, =, ^, _, {{, }}.\n"
-        f"2. ENVIRONMENT RULES: PROHIBITED: \\begin{{array}} for equations. Use aligned/cases instead. PROHIBITED: Manual numbering like (7).\n"
-        f"3. FULL DOCUMENT: You must generate everything from \\documentclass to \\end{{document}}.\n"
-        f"4. CLEANLINESS: Ignore all CSS, HTML <style> tags, or original PDF page numbers.\n"
-        f"5. OUTPUT: Return ONLY the final LaTeX code block."
+        f"2. EQUATION TAGGING: If a display math block ($$) contains a manual tag like (1), (2.1), etc., DO NOT use \\tag{{}}. Instead, use the \\begin{{equation}} environment with a \\label{{eq:number}}.\n"
+        f"3. CROSS-REFERENCES: Convert all plain-text references to equations (e.g., 'as seen in (1)') into proper LaTeX \\ref{{eq:1}} commands.\n"
+        f"4. ENVIRONMENT RULES: PROHIBITED: \\begin{{array}} for equations. Use aligned/cases instead. PROHIBITED: Manual numbering like (7) except when converted to structural labels.\n"
+        f"5. CITATIONS: Convert all plain-text citations like [18], [1, 2], or (Author, 2020) into proper LaTeX \\cite{{...}} commands.\n"
+        f"6. FULL DOCUMENT: You must generate everything from \\documentclass to \\end{{document}}.\n"
+        f"7. CLEANLINESS: Ignore all CSS, HTML <style> tags, or original PDF page numbers.\n"
+        f"8. OUTPUT: Return ONLY the final LaTeX code block."
         )
 
     
@@ -508,14 +519,30 @@ def compiler_node(state: PipelineState) -> dict:
     
     for r in range(1, 4):
         print(f"  [Round {r}] Compiling...")
-        subprocess.run(xelatex_cmd, cwd=p.parent, capture_output=True)
+        result = subprocess.run(xelatex_cmd, cwd=p.parent, capture_output=True, text=True)
         
         # Check for BibTeX
         aux = p.with_suffix(".aux")
         if r == 1 and aux.exists() and "\\citation" in aux.read_text(encoding="utf-8", errors="ignore"):
             print("  - Running BibTeX...")
             subprocess.run(["bibtex", p.stem], cwd=p.parent, capture_output=True)
-            subprocess.run(xelatex_cmd, cwd=p.parent, capture_output=True)
+            result = subprocess.run(xelatex_cmd, cwd=p.parent, capture_output=True, text=True)
+        
+        if result.returncode != 0:
+            print(f"  ❌ xelatex failed with return code {result.returncode}")
+            # Extract and print actual errors from stdout/stderr or log
+            log_path = p.with_suffix(".log")
+            if log_path.exists():
+                log_content = log_path.read_text(encoding="utf-8", errors="ignore")
+                # Find lines starting with '!' which are LaTeX errors
+                errors = [line for line in log_content.splitlines() if line.startswith("!")]
+                if errors:
+                    print("  [LaTeX Errors Found]:")
+                    for err in errors[:10]: # Show top 10
+                        print(f"    {err}")
+            else:
+                print("  [Output]:")
+                print(result.stdout[-500:]) # Show last 500 chars of stdout
         
         source_text = p.read_text(encoding="utf-8")
         # Automatic repair disabled as requested
