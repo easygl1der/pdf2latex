@@ -1,92 +1,114 @@
-# pdf2latex — PDF to LaTeX Automatic Conversion Tool
+# pdf2latex: High-Fidelity Academic PDF to LaTeX Converter
 
-## Overview
-Given any PDF (textbook/paper/book), pdf2latex automatically converts it into a complete LaTeX project using a specified template.
+`pdf2latex` is a specialized pipeline designed to convert complex academic PDFs into clean, professional, and compilable LaTeX source code. It utilizes a **Vision-Enhanced Multi-Agent** architecture powered by LangGraph, capable of handling long documents through a "Skeleton + Injection" workflow.
 
-## Architecture
-```
-PDF File
-  │
-  ▼  Step 1: MinerU API
-[Transcription Node] ──→ output/converted.md
-  │
-  ▼  Step 2: Supervisor Agent
-[Chapter Partitioning] ──→ [{index, title, content}, ...]
-  │
-  │  Send API (Parallel Dispatch)
-  ├──→ [Sub-Agent Ch 1] ──┐
-  ├──→ [Sub-Agent Ch 2] ──┤  Convert to LaTeX based on template
-  └──→ [Sub-Agent Ch N] ──┤
-                          │
-  ▼  Step 4 (Gather)      │
-[Retriever] ←─────────────┘  Formatting consistency check
-  │
-  ▼  Step 5
-[Assembler] ──→ output/ch01_xxx.tex
-            ──→ output/ch02_xxx.tex
-            ──→ output/main.tex          (Full merged version)
-            ──→ output/main_modular.tex  (Modular version with \input)
-```
+---
 
-## Installation
+## 🚀 Core Features
+
+- **Divide & Conquer**: Documents are split into logical sections/chapters for parallel processing, preventing model fatigue and context loss.
+- **Skeleton + Injection**: Generates a stable LaTeX framework first, then surgically injects content section-by-section using the `replace` logic.
+- **Vision-Assisted Layout**: Uses `gemma-vision` to analyze figures, subfigure grids (e.g., 2x2), and complex tables from original PDF pages.
+- **Auto-Continuation 2.0**: Intelligent "relay" mechanism with fuzzy deduplication to generate extremely long documents without truncation issues.
+- **Compact Math Policy**: Enforces strict mathematical typesetting (zero-space formulas) for professional publication quality.
+- **Structural Referencing**: Automatically converts manual equation tags `(1)` into `\label{eq:1}` and text mentions into `\ref{eq:1}`.
+- **Modular Prompts**: All system instructions are externalized in the `prompts/` directory for easy tuning without touching code.
+
+---
+
+## 🏗 Workflow Architecture
+
+1.  **Step 0: Transcription**: Uses MinerU Cloud API to perform high-quality OCR and convert PDF to initial Markdown.
+2.  **Step 1: Deep-Cleaning**: A dedicated reasoning model (e.g., DeepSeek-V4) sanitizes the Markdown, standardizes Unicode symbols, and protects images.
+3.  **Step 2: Classification**: Vision agent analyzes the PDF to determine if it's a `paper` or `book` and extracts mandatory metadata (Title, Author, Date).
+4.  **Step 3: Skeleton Building**: Generates a standard LaTeX preamble and body with placeholders (`% CONTENT_PLACEHOLDER_N %`).
+5.  **Step 4: Parallel Writing**: Multiple writer agents convert Markdown sections to LaTeX simultaneously, referencing visual context for images.
+6.  **Step 5: Surgical Assembly**: The writer engine replaces placeholders in the skeleton with generated LaTeX blocks.
+7.  **Step 6: Compilation**: Runs `xelatex` and `bibtex`, outputting real-time error logs to the console for transparency.
+
+---
+
+## 🛠 Prerequisites
+
+- **Python 3.10+**
+- **TeX Live / MacTeX**: Specifically `xelatex` and `bibtex` must be in your PATH.
+- **API Keys**: 
+  - `MINERU_API_KEY`: For Step 0 OCR.
+  - `OPENAI_API_KEY` (or compatible): For reasoning and writing.
+  - `DEEPSEEK_API_KEY`: Optional but recommended for cleaning.
+- **Environment Variables**: Configure these in your `.env` or export them.
+
+---
+
+## 📦 Installation
+
 ```bash
+git clone https://github.com/easygl1der/pdf2latex.git
+cd pdf2latex
 pip install -r requirements.txt
 ```
 
-## Configure API Keys
+---
+
+## 📖 Usage Guide
+
+### Basic Command
 ```bash
-export MINERU_API_KEY="Your MinerU Key"     # Get from mineru.net
-# Optional, needed when using OpenAI models:
-export OPENAI_API_KEY="Your OpenAI Key"
+python main.py pdf/your_paper.pdf
 ```
 
-## Usage
+### Advanced CLI Options
 
+| Flag | Description | Default |
+| :--- | :--- | :--- |
+| `--model` | Select the main writing model (e.g., `ollama`, `gpt-oss`, `gemini`, `openai`). | `ollama` |
+| `--clean-model` | Model used for Step 1 Markdown cleaning. | `deepseek-v4` |
+| `--force-clean` | Bypass the cleaning cache and re-run Step 1. | `False` |
+| `--template` | Choose a LaTeX template (`amsart`, `article`, `beamer`, etc.). | `amsart` |
+| `--mode` | `original` (Strict reproduction) or `habit` (Stein/Pedagogical style). | `original` |
+
+### Example: Running a 120B model with forced cleaning
 ```bash
-# List available templates
-python main.py --list-templates
-
-# Use amsart template (Mathematical paper style)
-python main.py mybook.pdf --template amsart
-
-# Use ctexart template (Chinese textbook style)
-python main.py mybook.pdf --template ctexart --model ollama
-
-# Use article template + OpenAI model
-python main.py mybook.pdf --template article --model openai
-
-# Generate Beamer slides
-python main.py mybook.pdf --template beamer
+python main.py pdf/test-1.pdf --model gpt-oss --force-clean
 ```
 
-## Available Templates
+---
 
-| Template Name | Use Case |
-|---------------|----------|
-| `amsart`      | Math papers/notes |
-| `article`     | General purpose articles/notes |
-| `ctexart`     | Chinese textbooks (Chinese prioritized) |
-| `beamer`      | Presentations (Slides) |
+## 📁 Project Structure
 
-## Adding Custom Templates
-Add a new entry to the `TEMPLATES` dictionary in `scripts/config.py`:
-```python
-"mytemplate": {
-    "desc": "My Template Description",
-    "preamble": r"""\documentclass{...}
-...
-""",
-    "body_wrapper": r"""\begin{document}
-__BODY__
-\end{document}
-""",
-    "style_hint": "Tell the AI what environments and styles to use",
-},
-```
+- **`main.py`**: The entry point and orchestrator.
+- **`prompts/`**: 
+  - `cleaning_system.md`: Instructions for sanitizing raw OCR.
+  - `chapter_system.md`: Rules for converting individual sections.
+  - `paper_system.md`: Full-paper generation strategy.
+- **`scripts/`**:
+  - `llm.py`: The "Auto-Continuation" engine with stitching logic.
+  - `writer_engine.py`: Skeleton creation and injection logic.
+  - `nodes.py`: Individual LangGraph logic nodes.
+  - `config.py`: Model definitions and LaTeX templates.
+- **`output/`**: All generated artifacts (MD, TEX, LOG, PDF) are stored in subfolders named after the PDF.
 
-## Output Files
-- `output/<stem>/<stem>.md`       — MinerU transcription output (cached automatically).
-- `output/<stem>/snippets/`      — Individual chapter tex files.
-- `output/<stem>/reviewed_snippets/` — Snippets reviewed by the Retriever.
-- `output/<stem>/main.tex`       — Merged version (compile directly).
-- `output/<stem>/main_modular.tex` — Modular version (using \input for each chapter).
+---
+
+## 🔧 Customization
+
+### Changing the Writing Style
+Edit `docs/style-prompt.md` to adjust global LaTeX rules (e.g., how theorems are defined, how equations are spaced).
+
+### Tuning the Conversion Logic
+Edit the files in `prompts/`. For example, to make the model use more specific LaTeX packages, add them to `paper_system.md`.
+
+---
+
+## ❓ Troubleshooting
+
+**"xelatex failed (RC 1)"**
+Check the console output under `[LaTeX Errors Found]`. The system automatically extracts lines starting with `!` from the `.log` file to show you exactly what failed (e.g., a missing bracket or undefined command).
+
+**"Missing images in LaTeX"**
+Ensure that the `content_list.json` generated by MinerU is in the output folder. The Vision Agent needs this to map Markdown image paths to PDF coordinates.
+
+---
+
+## 📝 License
+MIT License. Created for researchers who demand production-grade LaTeX from their PDF sources.
