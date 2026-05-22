@@ -13,3 +13,11 @@
 3. **Parallel Processing:** Convert each chapter to LaTeX in parallel using specialized writer agents.
 4. **Validation:** Each LaTeX snippet must be reviewed by a retriever node for formatting correctness.
 5. **Assembly:** Final assembly into both single-file and modular LaTeX documents.
+
+## Available Skills
+The following skills are linked and available for use in this project:
+- **Research & Data:** `web-research`, `arxiv`, `gs-search`, `youtube-transcript`, `youtube-data`, `last30days`.
+- **Code & Git:** `auto-commit-push`, `github-repo-analyzer`, `ai-slop-cleaner`, `self-improve`.
+- **Document Processing:** `mineru-pdf-converter`, `pdf-merger`, `pdf-figure-extractor`, `md-to-docx`.
+- **Automation & Tools:** `agent-browser`, `find-skills`, `obsidian-cli`, `slack`, `twitterapi-io`.
+- **Specialized Workflows:** `homework-solve`, `xhs-summary`, `polymarket-data-collector`.
