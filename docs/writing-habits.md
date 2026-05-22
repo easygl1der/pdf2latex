@@ -105,6 +105,7 @@ Mimic the narrative style of Stein's *Fourier Analysis* and *Complex Analysis*:
 - Code: `\begin{verbatim}...\end{verbatim}` or `\texttt{text}`
 - References: `\label{}` + `\cref{}`
 - Footnotes: `\footnote{}`
+- HTML `<details>` and `<summary>`: Convert to `\paragraph*{<summary_text>}` or a `remark` environment. Discard HTML/CSS and format inner content normally (e.g., Markdown tables become `\begin{table}`).
 
 ### Chinese Punctuation (for multilingual contexts)
 

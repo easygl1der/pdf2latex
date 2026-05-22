@@ -1,12 +1,114 @@
 """
 Minimal LangGraph Nodes for pdf2latex with Surgical Repair Loop
 """
+import json
 import re
 import subprocess
+import base64
+import fitz
 from pathlib import Path
 from langgraph.types import Send
 from .config import TEMPLATES, OUTPUT_ROOT, PipelineState, WriterInput
 from .llm import call_llm
+
+def _get_pdf_page_image(pdf_path: str, page_idx: int) -> str:
+    """Capture a specific page of PDF as a base64 encoded JPEG."""
+    try:
+        doc = fitz.open(pdf_path)
+        if page_idx >= len(doc):
+            return ""
+        page = doc.load_page(page_idx)
+        pix = page.get_pixmap(matrix=fitz.Matrix(2, 2))
+        img_bytes = pix.tobytes("jpg", jpg_quality=75)
+        doc.close()
+        return base64.b64encode(img_bytes).decode("utf-8")
+    except Exception as e:
+        print(f"    [Error] Failed to capture page {page_idx}: {e}")
+        return ""
+
+def _analyze_images(markdown_text: str, content_list_path: str, pdf_path: str) -> str:
+    """Identify images in Markdown, look them up in content_list, and get vision descriptions."""
+    if not content_list_path or not Path(content_list_path).exists():
+        return ""
+    
+    try:
+        with open(content_list_path, 'r', encoding='utf-8') as f:
+            content_list = json.load(f)
+    except Exception:
+        return ""
+
+    # Find all image tags like ![](images/abc.png)
+    img_matches = re.findall(r'!\[.*?\]\((images/.*?)\)', markdown_text)
+    if not img_matches:
+        return ""
+
+    descriptions = []
+    seen_images = set()
+
+    print(f"\n  [Vision] 👁️  Analyzing {len(img_matches)} images in this section...")
+    
+    for img_rel_path in img_matches:
+        if img_rel_path in seen_images:
+            continue
+        seen_images.add(img_rel_path)
+
+        # Find metadata in content_list
+        meta = next((item for item in content_list if item.get("img_path") == img_rel_path), None)
+        if not meta:
+            img_name = Path(img_rel_path).name
+            meta = next((item for item in content_list if item.get("img_path") and Path(item["img_path"]).name == img_name), None)
+
+        if meta and "page_idx" in meta:
+            page_idx = meta["page_idx"]
+            print(f"\n    ┌─── 📸 [Vision Subagent: gemma-vision] ───")
+            print(f"    │ Source: {img_rel_path}")
+            print(f"    │ Page:   {page_idx+1}")
+            print(f"    └───────────────────────────────────────")
+            
+            img_b64 = _get_pdf_page_image(pdf_path, page_idx)
+            
+            if img_b64:
+                system = (
+                    "You are a professional vision assistant for a LaTeX document converter.\n"
+                    "Analyze the provided PDF page image and focus on the specific figure mentioned.\n\n"
+                    "TASKS:\n"
+                    "1. IMAGE CONTENT: Describe the visual content (e.g., line chart, flow diagram, photo).\n"
+                    "2. LAYOUT & ARRANGEMENT: Is this a single image or a compound figure?\n"
+                    "   - Check for subfigures (e.g., labeled as (a), (b), (c)).\n"
+                    "   - Describe the spatial relationship: Are they side-by-side (horizontal), stacked (vertical), or in a grid (e.g., 2x2)?\n"
+                    "3. CAPTIONING: Extract the main figure caption AND any sub-captions or labels found near the sub-images.\n"
+                    "4. PLACEMENT: Describe its position relative to the surrounding text blocks.\n\n"
+                    "OUTPUT: Provide a concise report that helps a LaTeX expert decide whether to use a standard 'figure' environment or a complex 'subfigure' (subcaption package) structure."
+                )
+                user = f"Please analyze the image '{img_rel_path}' and its surrounding layout on this page."
+                
+                # Use vision model
+                desc = call_llm("gemma-vision", system, user, temperature=0, show_thinking=False, image_b64=img_b64)
+                
+                print(f"    ✅ Vision analysis for {Path(img_rel_path).name} complete.\n")
+                descriptions.append(f"### Visual Context for {img_rel_path}:\n{desc}")
+
+    if descriptions:
+        print(f"  [Vision] ✓ Image analysis phase finished.\n")
+        return "\n\n" + "\n\n".join(descriptions)
+    return ""
+
+def _get_pdf_first_page_image(pdf_path: str) -> str:
+    """Capture the first page of PDF as a base64 encoded JPEG."""
+    doc = fitz.open(pdf_path)
+    if len(doc) == 0:
+        return ""
+    page = doc.load_page(0)
+    # 2x scale is good for OCR but might be large. 
+    # Using JPEG with quality 75 significantly reduces size.
+    pix = page.get_pixmap(matrix=fitz.Matrix(2, 2))
+    img_bytes = pix.tobytes("jpg", jpg_quality=75)
+    doc.close()
+    
+    b64 = base64.b64encode(img_bytes).decode("utf-8")
+    print(f"    [Size] Captured image: {len(img_bytes)/1024:.1f} KB (Base64: {len(b64)/1024:.1f} KB)")
+    return b64
+
 from .error_memory import build_memory_prompt, summarize_fixes
 
 def _clean_res(res: str) -> str:
@@ -73,7 +175,7 @@ def get_style_prompt(mode: str = "original") -> str:
             
     # Always include these for technical correctness and requested compactness
     # Moved MATH_NOTATION to the front to ensure high priority
-    base_sections = ["MATH_NOTATION", "FORMATTING_RULES", "LABELS", "THEOREMS"]
+    base_sections = ["MATH_NOTATION", "FORMATTING_RULES", "CITATIONS", "FIGURES_AND_TABLES", "LABELS", "THEOREMS"]
     
     if mode == "habit":
         # Habit Mode: Stylized adaptation using Stein Style guidelines
@@ -88,8 +190,12 @@ def get_style_prompt(mode: str = "original") -> str:
         mission = (
             "MISSION: STRICT CONTENT FIDELITY (Origin Mode).\n"
             "1. You MUST preserve all original text, wording, and structure exactly as it appears.\n"
-            "2. EXCEPTION: You MUST optimize mathematical formulas to be COMPACT (remove all unnecessary spaces between symbols, commas, and operators) even if the original Markdown has spaces.\n"
-            "Do NOT add, remove, or rephrase any prose text. Only apply technical LaTeX formatting."
+            "2. CRITICAL EXCEPTION: ALL mathematical formulas MUST be COMPACT. Remove all spaces between symbols, commas, operators, and indices.\n"
+            "   - BAD: $a + b = c$ | GOOD: $a+b=c$\n"
+            "   - BAD: $\sum_ {i=1} ^ {n}$ | GOOD: $\sum_{i=1}^{n}$\n"
+            "3. STRICT PROHIBITION: DO NOT use '\\begin{array}' for equations. Use 'aligned' or 'cases'. DO NOT use manual numbering like '(7)'.\n"
+            "4. SKIP CSS: Completely ignore all CSS code, <style> tags, or inline styles. DO NOT convert them.\n"
+            "5. NEVER GENERATE SPARSE CODE LIKE THIS: '$$ \\begin{array}{l} \\max _ {q} \\dots \\end{array} $$'. All math must be dense and clean."
         )
         selected = base_sections
         
@@ -106,24 +212,28 @@ def get_style_prompt(mode: str = "original") -> str:
 # ═══════════════════════════════════════════════════════════════
 
 def classifier_node(state: PipelineState) -> dict:
-    print("\n[Step 1] Classifier & Metadata Extraction")
-    full_text = Path(state["markdown_path"]).read_text(encoding="utf-8")
-    # Reduced metadata sample to 50k - more than enough for headers, much faster pre-fill
-    sample = full_text[:50000] 
-    
-    print(f"  [Analyzing] Document structure and metadata (50k context)...")
+    print("\n[Step 1] Classifier & Metadata Extraction (Vision Mode)")
+
+    print(f"  [Capturing] First page of {Path(state['pdf_path']).name}...")
+    img_b64 = _get_pdf_first_page_image(state["pdf_path"])
+
     system = (
-        "Analyze the following Markdown document. Provide two pieces of information:\n"
+        "You are a professional document classifier. Look at the provided image of the first page of a document.\n"
+        "Analyze the structure and content to extract:\n"
         "1. TYPE: Is this a 'book' or a 'paper'?\n"
         "2. METADATA: Extract TITLE, AUTHOR, and writing DATE (use 'unknown' if not found).\n"
         "Format exactly as: TYPE: ... | TITLE: ... | AUTHOR: ... | DATE: ..."
     )
-    res = call_llm(state["model_name"], system, sample, temperature=0, show_thinking=False)
-    
+    user = "Please analyze this document page."
+
+    print(f"  [Analyzing] Document vision features (gemma4:31b-cloud)...")
+    # Use the specific vision model for this step. Vision models are often slower, so 120s timeout.
+    res = call_llm("gemma-vision", system, user, temperature=0, show_thinking=False, image_b64=img_b64, timeout=120.0)
+
     # Parse combined response
     doc_type = "paper"
     title, author, date = Path(state["pdf_path"]).stem, "Anonymous", "unknown"
-    
+
     try:
         parts = res.split("|")
         for p in parts:
@@ -133,11 +243,11 @@ def classifier_node(state: PipelineState) -> dict:
             if "DATE:" in p: date = p.split("DATE:")[1].strip()
     except Exception:
         pass
-        
+
     tpl = "amsart" if doc_type == "paper" else "article"
     print(f"  - Classified as: {doc_type} -> Template: {tpl}")
     print(f"  - Metadata: {title} | {author} | {date}")
-    
+
     out_dir = OUTPUT_ROOT / Path(state["pdf_path"]).stem
     out_dir.mkdir(parents=True, exist_ok=True)
     return {
@@ -148,7 +258,6 @@ def classifier_node(state: PipelineState) -> dict:
         "doc_author": author,
         "doc_date": date
     }
-
 def route_by_doc_type(state: PipelineState) -> str:
     return "supervisor" if state["doc_type"] == "book" else "paper_writer"
 
@@ -174,9 +283,30 @@ def chapter_writer_node(state: WriterInput) -> dict:
     print(f"  [Writer] {ch['title']}")
     lines = Path(state["markdown_path"]).read_text(encoding="utf-8").splitlines()
     content = "\n".join(lines[ch["line_start"]-1 : ch["line_end"]])
+    
+    # Vision enhancement for images
+    visual_context = _analyze_images(content, state.get("content_list_path", ""), state.get("pdf_path", ""))
+    
     tpl = TEMPLATES[state["template_name"]]
     style_prompt = get_style_prompt(state.get("mode", "original"))
-    system = f"Convert this Markdown to LaTeX snippet for {state['template_name']} style. {tpl['style_hint']}\n\n{style_prompt}"
+    
+    # Structured Prompt Engineering
+    system = (
+        f"### ROLE: SENIOR LATEX TYPESETTING EXPERT\n"
+        f"You are converting a scientific document to the {state['template_name']} LaTeX style.\n\n"
+        f"### GUIDELINES & STYLE:\n{tpl['style_hint']}\n{style_prompt}\n\n"
+        f"### VISUAL CONTEXT (FIGURES & TABLES):\n{visual_context if visual_context else 'No images in this section.'}\n\n"
+        f"### CRITICAL CONSTRAINTS (MANDATORY):\n"
+        f"1. MATHEMATICAL FORMULAS MUST BE COMPACT: Remove ALL unnecessary spaces between symbols, operators, and indices.\n"
+        f"   - EXAMPLE: Use $a+b=c$, NOT $a + b = c$.\n"
+        f"   - EXAMPLE: Use $\\max_{{q}}\\mathcal{{L}}$, NOT $\\max _ {{q}} \\mathcal {{L}}$.\n"
+        f"   - RULE: Zero spaces after \\sum, \\max, \\int, and around +, -, =, ^, _, {{, }}.\n"
+        f"2. NO \\begin{{array}}: Use 'aligned', 'cases', or 'matrix' environments for equations. Manual numbering like (7) is FORBIDDEN.\n"
+        f"3. DOCUMENT COMPLETENESS: Ensure all text from the source markdown is preserved.\n"
+        f"4. OUTPUT FORMAT: Return ONLY the LaTeX code inside a single code block."
+        )
+
+    
     res = _clean_res(call_llm(state["model_name"], system, content))
     return {"chapter_outputs": [{
         "index": ch["index"], 
@@ -189,6 +319,10 @@ def paper_writer_node(state: PipelineState) -> dict:
     print("\n[Paper Writer]")
     print(f"  [Reading] Loading full markdown source...")
     txt = Path(state["markdown_path"]).read_text(encoding="utf-8")
+    
+    # Vision enhancement for images
+    visual_context = _analyze_images(txt, state.get("content_list_path", ""), state.get("pdf_path", ""))
+    
     tpl = TEMPLATES[state["template_name"]]
     
     template_structure = tpl["preamble"].replace("__TITLE__", state["doc_title"])\
@@ -197,19 +331,33 @@ def paper_writer_node(state: PipelineState) -> dict:
                          tpl["body_wrapper"].replace("__BODY__", "% Your content here")
     
     style_prompt = get_style_prompt(state.get("mode", "original"))
-    system = (
-        f"Convert this Markdown to a FULL and COMPLETE LaTeX document for the {state['template_name']} style.\n"
-        f"You MUST generate the entire document from \\documentclass to \\end{{document}}.\n"
-        f"Use the following template structure as your exact base:\n\n"
-        f"```latex\n{template_structure}\n```\n\n"
-        f"{tpl['style_hint']}\n\n"
-        f"{style_prompt}"
-    )
     
-    print(f"  [Generating] LaTeX document (Processing {len(txt)} chars context)...")
+    # Structured Prompt Engineering
+    system = (
+        f"### ROLE: SENIOR LATEX TYPESETTING EXPERT\n"
+        f"Convert the following Markdown to a FULL and COMPLETE LaTeX document for the {state['template_name']} style.\n\n"
+        f"### TARGET TEMPLATE STRUCTURE:\n```latex\n{template_structure}\n```\n\n"
+        f"### STYLE SPECIFICATIONS:\n{tpl['style_hint']}\n{style_prompt}\n\n"
+        f"### VISUAL CONTEXT FOR IMAGES:\n{visual_context if visual_context else 'No image data available.'}\n\n"
+        f"### CRITICAL CONSTRAINTS (MUST FOLLOW):\n"
+        f"1. COMPACT MATH: All math formulas MUST have ZERO SPACES.\n"
+        f"   - EXAMPLE: Use $a+b=c$, NOT $a + b = c$.\n"
+        f"   - EXAMPLE: Use $\\max_{{q}}\\mathcal{{L}}$, NOT $\\max _ {{q}} \\mathcal {{L}}$.\n"
+        f"   - RULE: Zero spaces after \\sum, \\max, \\int, and around +, -, =, ^, _, {{, }}.\n"
+        f"2. ENVIRONMENT RULES: PROHIBITED: \\begin{{array}} for equations. Use aligned/cases instead. PROHIBITED: Manual numbering like (7).\n"
+        f"3. FULL DOCUMENT: You must generate everything from \\documentclass to \\end{{document}}.\n"
+        f"4. CLEANLINESS: Ignore all CSS, HTML <style> tags, or original PDF page numbers.\n"
+        f"5. OUTPUT: Return ONLY the final LaTeX code block."
+        )
+
+    
     res = _clean_res(call_llm(state["model_name"], system, txt))
     
-    p = Path(state["output_dir"]) / "main.tex"
+    # Vision enhancement for images
+    output_dir = Path(state["output_dir"])
+    # _resolve_citations(res, output_dir)  # Disabled as requested
+
+    p = output_dir / "main.tex"
     p.write_text(res, encoding="utf-8")
     return {"final_latex": str(p)}
 
@@ -261,7 +409,35 @@ def paper_validator_node(state: PipelineState) -> dict:
     p.write_text(fixed_latex, encoding="utf-8")
     return {}
 
-from .cite_tool import extract_citations, search_crossref, search_arxiv, format_bibitem
+from .cite_tool import extract_citations, search_crossref, search_arxiv, format_bibitem, get_crossref_bibtex
+
+def _resolve_citations(latex_body: str, output_dir: Path) -> None:
+    """Extract citations from LaTeX, resolve them via APIs, and generate refs.bib."""
+    all_keys = extract_citations(latex_body)
+    if not all_keys:
+        return
+
+    print(f"  - Resolving {len(all_keys)} citations for refs.bib...")
+    bib_entries = []
+    
+    for key in all_keys:
+        # We'll use the key as a query if it looks like a title/author
+        item = search_crossref(key) or search_arxiv(key)
+        if item:
+            doi = item.get("DOI")
+            # Try to get standard BibTeX from CrossRef
+            bib_text = get_crossref_bibtex(doi) if doi else None
+            if bib_text:
+                bib_entries.append(bib_text)
+            else:
+                title = item.get("title", [key])[0]
+                bib_entries.append(f"@article{{{key},\n  title={{{title}}},\n  year={{2024}}\n}}")
+        else:
+            bib_entries.append(f"@misc{{{key},\n  title={{{key}}},\n  note={{Automatically resolved}}\n}}")
+    
+    bib_path = output_dir / "refs.bib"
+    bib_path.write_text("\n\n".join(bib_entries), encoding="utf-8")
+    print(f"  ✓ Generated {bib_path.name}")
 
 def assembler_node(state: PipelineState) -> dict:
     print("\n[Step 5] Assembler")
@@ -272,36 +448,8 @@ def assembler_node(state: PipelineState) -> dict:
     # 1. Combine body
     body = "\n".join(c["latex_body"] for c in sorted_ch)
     
-    # 2. Extract and resolve citations for refs.bib
-    all_keys = extract_citations(body)
-    bib_entries = []
-    
-    if all_keys:
-        print(f"  - Resolving {len(all_keys)} citations for refs.bib...")
-        # Since we don't have full metadata for all keys, we try to find them
-        # This is a simplified version. In a real scenario, we'd need more data.
-        for key in all_keys:
-            # We'll use the key as a query if it looks like a title/author
-            # Otherwise, we might need a more sophisticated lookup
-            # For now, we'll generate a dummy entry if not found to prevent BibTeX errors
-            item = search_crossref(key) or search_arxiv(key)
-            if item:
-                # Get standard BibTeX if possible
-                doi = item.get("DOI")
-                from .cite_tool import get_crossref_bibtex
-                bib_text = get_crossref_bibtex(doi) if doi else None
-                if bib_text:
-                    bib_entries.append(bib_text)
-                else:
-                    # Fallback to manual formatting (simplified BibTeX entry)
-                    title = item.get("title", [key])[0]
-                    bib_entries.append(f"@article{{{key},\n  title={{{title}}},\n  year={{2024}}\n}}")
-            else:
-                bib_entries.append(f"@misc{{{key},\n  title={{{key}}},\n  note={{Automatically resolved}}\n}}")
-        
-        bib_path = output_dir / "refs.bib"
-        bib_path.write_text("\n\n".join(bib_entries), encoding="utf-8")
-        print(f"  ✓ Generated {bib_path.name}")
+    # 2. Resolve citations
+    # _resolve_citations(body, output_dir)  # Disabled as requested
 
     # 3. Assemble main.tex
     final = tpl["preamble"].replace("__TITLE__", state["doc_title"])\
@@ -318,14 +466,39 @@ def assembler_node(state: PipelineState) -> dict:
 # ═══════════════════════════════════════════════════════════════
 
 def _parse_latex_log(log_path: Path, source_text: str) -> list[dict]:
-    """Extract errors with line numbers and find lines for citations."""
+    """Extract errors with line numbers from LaTeX log."""
     if not log_path.exists(): return []
     log_content = log_path.read_text(encoding="utf-8", errors="ignore")
-    lines = source_text.splitlines()
     issues = []
+    
+    # Format 1: file.tex:line: message (Modern style)
     for m in re.finditer(r'(?:\./)?\S+\.tex:(\d+):\s*(.+)', log_content):
         issues.append({"line": int(m.group(1)), "msg": m.group(2).strip()})
-    return issues[:5]
+        
+    # Format 2: ! LaTeX Error: ... followed by l.line_number (Classic style)
+    if not issues:
+        # Match pattern like: ! LaTeX Error: ... \n ... \n l.64 \begin{algorithm}
+        pattern = r'!\s+(.*?)\n.*?\nl\.(\d+)\s'
+        for m in re.finditer(pattern, log_content, re.DOTALL):
+            issues.append({"line": int(m.group(2)), "msg": m.group(1).strip()})
+            
+    # Format 3: Generic Emergency Stop or Runaway argument
+    if not issues:
+        if "! Emergency stop" in log_content or "Runaway argument?" in log_content:
+            # If no line found, try to find the last reported line
+            line_match = re.search(r'l\.(\d+)', log_content)
+            if line_match:
+                issues.append({"line": int(line_match.group(1)), "msg": "Structural error or missing closure near this line."})
+
+    # Filter out duplicates and keep top 5
+    unique_issues = []
+    seen_lines = set()
+    for iss in issues:
+        if iss["line"] not in seen_lines:
+            unique_issues.append(iss)
+            seen_lines.add(iss["line"])
+            
+    return unique_issues[:5]
 
 def compiler_node(state: PipelineState) -> dict:
     print(f"\n[Step 6] Compiler (Line-Focused Surgical Repair)")
@@ -345,6 +518,8 @@ def compiler_node(state: PipelineState) -> dict:
             subprocess.run(xelatex_cmd, cwd=p.parent, capture_output=True)
         
         source_text = p.read_text(encoding="utf-8")
+        # Automatic repair disabled as requested
+        """
         issues = _parse_latex_log(p.with_suffix(".log"), source_text)
         
         if not issues:
@@ -372,6 +547,9 @@ def compiler_node(state: PipelineState) -> dict:
                 summarize_fixes([issue], context, fixed, model)
                 
         p.write_text("\n".join(source_lines), encoding="utf-8")
+        """
+        # Just break after standard compilation (and optional BibTeX)
+        break
     
     pdf_path = p.with_suffix(".pdf")
     if pdf_path.exists():

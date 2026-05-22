@@ -1,0 +1,244 @@
+{
+  "entries": [
+    {
+      "pattern": "Illegal Environment Nesting",
+      "fix": "DO NOT put 'tabular' or other complex environments inside \\caption{...}. Place them outside the caption.",
+      "example_before": "\\caption{\\begin{tabular}{c}A\\\\B\\end{tabular}}",
+      "example_after": "\\begin{tabular}{c}A\\\\B\\end{tabular}\\n\\caption{Table description}",
+      "count": 20,
+      "last_seen": "2026-05-22"
+    },
+    {
+      "pattern": "LLM Infinite Content Loop",
+      "fix": "Detect and stop infinite character repetition (hallucination). Ensure environments like \\caption{...} are properly closed with '}'.",
+      "example_before": "\\caption{Description... [repeated thousands of times]",
+      "example_after": "\\caption{Clean and concise description.}",
+      "count": 20,
+      "last_seen": "2026-05-22"
+    },
+    {
+      "pattern": "amsart Template Author Formatting",
+      "fix": "In 'amsart' class, use multiple \\author{...} commands. DO NOT put \\thanks inside \\author or use \\and.",
+      "example_before": "\\author{A \\thanks{...} \\and B}",
+      "example_after": "\\author{A}\\n\\author{B}",
+      "count": 20,
+      "last_seen": "2026-05-22"
+    },
+    {
+      "pattern": "Missing Control Sequences (Packages)",
+      "fix": "Include necessary packages: multirow for \\multirow, algorithm/algpseudocode for algorithms.",
+      "example_before": "\\begin{algorithm}...",
+      "example_after": "\\usepackage{algorithm}\\n\\usepackage{algpseudocode}\\n\\begin{algorithm}...",
+      "count": 20,
+      "last_seen": "2026-05-22"
+    },
+    {
+      "pattern": "fontspec Error: The font \"FandolSong-Regular\" cannot be found",
+      "fix": "On macOS, XeLaTeX/fontspec cannot find Fandol fonts by default. If the document is English only, comment out or remove \\usepackage{xeCJK} and \\setCJKmainfont. If CJK is needed on macOS, use \\usepackage[fontset=mac]{ctex} or \\setCJKmainfont{Songti SC}.",
+      "example_before": "\\usepackage{xeCJK}\n\\setCJKmainfont{FandolSong-Regular}",
+      "example_after": "% \\usepackage{xeCJK}\n% \\setCJKmainfont{FandolSong-Regular}",
+      "count": 20,
+      "last_seen": "2026-05-22"
+    },
+    {
+      "pattern": "Undefined control sequence. \\ForEach",
+      "fix": "In 'algpseudocode' (algorithmicx package), there is no \\ForEach command. Use standard \\For{each ...} or define custom \\ForEach block in preamble.",
+      "example_before": "\\ForEach{$(\\mathbf{x}_n, y_n)$ in $D$}",
+      "example_after": "\\For{each $(\\mathbf{x}_n, y_n)$ in $D$}",
+      "count": 20,
+      "last_seen": "2026-05-22"
+    },
+    {
+      "fix": "Add the missing bibliography entry for the cited key",
+      "example_before": "\\cite{FanGuo2021}",
+      "example_after": "\\cite{FanGuo2021}\\n\\bibitem{FanGuo2021}{Fan, J., Guo, Z., and Author, A., \"``Title of the paper''\", Journal, Year.}",
+      "count": 5,
+      "last_seen": "2026-05-21",
+      "pattern": "Undefined citation reference"
+    },
+    {
+      "fix": "Remove the erroneous citation reference",
+      "example_before": "... and Knutson–Tao \\cite{13} provided geometric meanings to the expansion.",
+      "example_after": "... and Knutson–Tao provided geometric meanings to the expansion.",
+      "count": 4,
+      "last_seen": "2026-05-21",
+      "pattern": "Undefined citation 'N'"
+    },
+    {
+      "fix": "Add the missing bibliography entry for the cited reference",
+      "example_before": "\\cite{7}",
+      "example_after": "\\cite{7}\\n\\bibitem{7}{Author, Title, Journal, Year.}",
+      "count": 4,
+      "last_seen": "2026-05-21",
+      "pattern": "Undefined citation"
+    },
+    {
+      "pattern": "Unescaped Special Characters",
+      "fix": "Escape underscore characters in text mode by prefixing them with a backslash.",
+      "example_before": "teacher_standardized",
+      "example_after": "teacher\\_standardized",
+      "count": 4,
+      "last_seen": "2026-05-22"
+    },
+    {
+      "pattern": "Missing Environment Closure",
+      "fix": "Enclose proof text in a \\begin{proof}…\\end{proof} environment and terminate with \\qed.",
+      "example_before": "\\end{lemma}\\nProof. Recall that …",
+      "example_after": "\\end{lemma}\\n\\begin{proof}\\nRecall that … \\qed\\n\\end{proof}",
+      "count": 2,
+      "last_seen": "2026-05-22"
+    },
+    {
+      "fix": "Add the missing \\label{section:grothendieck-conj} command immediately before the section that is being referenced.",
+      "example_before": "\\section{Proof of the main theorem}",
+      "example_after": "\\label{section:grothendieck-conj}\\n\\section{Proof of the main theorem}",
+      "count": 1,
+      "last_seen": "2026-05-21",
+      "pattern": "Undefined reference to a label that has not been defined (missing \\label command)."
+    },
+    {
+      "fix": "Correct the \\ref argument to match the exact label name defined in the document",
+      "example_before": "\\ref{section:geom-interp}",
+      "example_after": "\\ref{section:geominterp}",
+      "count": 1,
+      "last_seen": "2026-05-21",
+      "pattern": "Undefined reference error caused by a mismatch between the label name used in \\ref and the actual label defined (e.g., h"
+    },
+    {
+      "fix": "Add \\label{section:billey} before the \\ref{section:billey}",
+      "example_before": "... (Section \\ref{section:billey}).",
+      "example_after": "... \\label{section:billey} A byproduct ...",
+      "count": 1,
+      "last_seen": "2026-05-21",
+      "pattern": "Undefined reference due to missing \\label for a section"
+    },
+    {
+      "fix": "Move the \\label command before any \\ref that points to it",
+      "example_before": "Our proof relies on a refined version of Graham’s positivity theorem \\cite{8} (Theorem \\ref{theorem:graham-refined}). To apply this result we establish a new geometric interpretation (Section \\ref{sec",
+      "example_after": "Our proof relies on a refined version of Graham’s positivity theorem \\cite{8} (Theorem \\ref{theorem:graham-refined}). To apply this result we establish a new geometric interpretation (Section \\ref{sec",
+      "count": 1,
+      "last_seen": "2026-05-21",
+      "pattern": "Undefined reference due to label placed after its first reference"
+    },
+    {
+      "fix": "Insert the \\label{section:geominterp} command before the first \\ref{section:geominterp} to define the label",
+      "example_before": "To apply this result we establish a new geometric interpretation (Section \\ref{section:geominterp}) for the coefficients $c_{u,v}^w(\\mathbf{y},\\mathbf{t})$, distinct from the one given by Knutson–Tao ",
+      "example_after": "\\label{section:geominterp} Our proof relies on a refined version of Graham’s positivity theorem \\cite{8} (Theorem \\ref{theorem:graham-refined}). To apply this result we establish a new geometric inter",
+      "count": 1,
+      "last_seen": "2026-05-21",
+      "pattern": "Undefined reference 'section:geominterp' due to missing \\label before its first \\ref"
+    },
+    {
+      "fix": "Ensure \\label{key} exists and matches the key in \\ref{key}",
+      "example_before": "",
+      "example_after": "",
+      "count": 1,
+      "last_seen": "2026-05-21",
+      "pattern": "Undefined reference 'section:billey'"
+    },
+    {
+      "fix": "Place the label inside a sectioning command by adding a \\section{...} directly after the label (or move the label after the \\section).",
+      "example_before": "\\label{section:geominterp} Our proof relies on a refined version of Graham’s positivity theorem \\cite{8} (Theorem \\ref{theorem:graham-refined}).",
+      "example_after": "\\label{section:geominterp}\\section{Geometric interpretation} Our proof relies on a refined version of Graham’s positivity theorem \\cite{8} (Theorem \\ref{theorem:graham-refined}).",
+      "count": 1,
+      "last_seen": "2026-05-21",
+      "pattern": "Undefined reference because \\label{section:geominterp} is not associated with any sectioning command, causing LaTeX to t"
+    },
+    {
+      "fix": "Add the missing bibliography entry for the cited key",
+      "example_before": "... where Samuel \\cite{21} established a positive formula, ...",
+      "example_after": "... where Samuel \\cite{21} established a positive formula, ...\\n\\bibitem{21}{Samuel, \\textit{Title of the work}, Journal, Year.}",
+      "count": 1,
+      "last_seen": "2026-05-21",
+      "pattern": "Undefined citation key"
+    },
+    {
+      "fix": "Replace the numeric citation key with the correct bibliographic key defined in the .bib file",
+      "example_before": "\\cite{6}",
+      "example_after": "\\cite{FanGuo2021}",
+      "count": 1,
+      "last_seen": "2026-05-21",
+      "pattern": "Undefined citation reference (numeric key not found in bibliography)"
+    },
+    {
+      "pattern": "Unrecognized Command / Missing Environment Closure",
+      "fix": "Replace incorrect rule commands with proper booktabs syntax and close the tabular environment.",
+      "example_before": "\\caption{line}\\n\\begin{tabular}{lr}\\n\\toprup\\nclass category (rows)   & teacher std (std)   \\\\\\n\\midrule",
+      "example_after": "\\caption{line}\\n\\begin{tabular}{lr}\\n\\toprule\\nclass category (rows)   & teacher std (std)   \\\\\\n\\midrule\\n\\bottomrule\\n\\end{tabular}",
+      "count": 1,
+      "last_seen": "2026-05-22"
+    },
+    {
+      "pattern": "Incorrect Argument Delimiter",
+      "fix": "Use square brackets for optional arguments in environments, not curly braces.",
+      "example_before": "\\begin{remark}{flowchart}",
+      "example_after": "\\begin{remark}[flowchart]",
+      "count": 1,
+      "last_seen": "2026-05-22"
+    },
+    {
+      "pattern": "Conflicting Font Package Usage",
+      "fix": "Comment out or remove the xeCJK package and its font command when they cause fontspec errors or are not needed for the chosen engine.",
+      "example_before": "\\usepackage{xeCJK}\n\\setCJKmainfont{FandolSong-Regular}",
+      "example_after": "% \\usepackage{xeCJK}\n% \\setCJKmainfont{FandolSong-Regular}",
+      "count": 1,
+      "last_seen": "2026-05-22"
+    },
+    {
+      "pattern": "Unwanted punctuation before table line break",
+      "fix": "Remove any punctuation directly before the `\\` command in a table row.",
+      "example_before": "(vertical axis: y-axis values; rows: x, y, z). \\",
+      "example_after": "(vertical axis: y-axis values; rows: x, y, z) \\",
+      "count": 1,
+      "last_seen": "2026-05-22"
+    },
+    {
+      "pattern": "Missing Environment Opening",
+      "fix": "Add the matching \\begin{environment} command before the corresponding \\end{environment} to properly open the environment.",
+      "example_before": "\\end{verbatim}\\n\\end{remark}",
+      "example_after": "\\begin{remark}\\n\\begin{verbatim}\\n    R[\"z = v + \\\\delta\\\"] --> S[\"\\\\delta\\\"]\\n\\end{verbatim}\\n\\end{remark}",
+      "count": 1,
+      "last_seen": "2026-05-22"
+    },
+    {
+      "pattern": "Unmatched Math Mode Delimiter",
+      "fix": "Close any opened display math mode \\[ with \\] before ending surrounding environments or the document.",
+      "example_before": "    P[\"Bird\"] --> Q[\"logit\"]\\n\\begin{remark}\\n\\begin{verbatim}\\n    R[\"z = v + δ\"] --> S[\"δ\"]\\n\\end{verbatim}",
+      "example_after": "\\]\\n    P[\"Bird\"] --> Q[\"logit\"]\\n\\begin{remark}\\n\\begin{verbatim}\\n    R[\"z = v + δ\"] --> S[\"δ\"]\\n\\end{verbatim}\\n\\end{remark}",
+      "count": 1,
+      "last_seen": "2026-05-22"
+    },
+    {
+      "pattern": "Undefined Environment",
+      "fix": "Define theorem-like environments with \\newtheorem before using them.",
+      "example_before": "\\begin{conjecture}\\label{conjecture:2.7} ... \\end{conjecture}",
+      "example_after": "\\newtheorem{conjecture}{Conjecture}\\begin{conjecture}\\label{conjecture:2.7} ... \\end{conjecture}",
+      "count": 1,
+      "last_seen": "2026-05-22"
+    },
+    {
+      "pattern": "Unbalanced Brackets in Optional Arguments",
+      "fix": "Wrap nested content containing square brackets in braces when used inside an optional argument to prevent premature termination.",
+      "example_before": "[\\cite[Conjecture 1]{11}]",
+      "example_after": "[{\\cite[Conjecture 1]{11}}]",
+      "count": 1,
+      "last_seen": "2026-05-22"
+    },
+    {
+      "pattern": "Unclosed Math Mode",
+      "fix": "Close inline math mode before placing punctuation that should appear outside the formula.",
+      "example_before": "$c_{u,v}^w(\\mathbf{y},\\mathbf{t})\\in\\mathbb{N}[t_i-y_j]_{i,j\\geq1}.",
+      "example_after": "$c_{u,v}^w(\\mathbf{y},\\mathbf{t})\\in\\mathbb{N}[t_i-y_j]_{i,j\\geq1}$.",
+      "count": 1,
+      "last_seen": "2026-05-22"
+    },
+    {
+      "pattern": "Unescaped Special Characters in Optional Arguments",
+      "fix": "When an optional argument contains LaTeX commands with braces, avoid nested brackets by restructuring the argument or protecting inner braces.",
+      "example_before": "\\begin{theorem}[\\cite[Conjecture 1.1]{21}]\\label{theorem:1.1}",
+      "example_after": "\\begin{theorem}[Conjecture 1.1 of \\cite{21}]\\label{theorem:1.1}",
+      "count": 1,
+      "last_seen": "2026-05-22"
+    }
+  ]
+}

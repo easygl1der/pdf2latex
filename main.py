@@ -8,9 +8,10 @@ import os
 import sys
 from pathlib import Path
 
-from scripts.config import TEMPLATES, MODELS, MINERU_API_KEY, OPENAI_API_KEY
+from scripts.config import TEMPLATES, MODELS, MINERU_API_KEY, OPENAI_API_KEY, DEEPSEEK_API_KEY
 from scripts.mineru_convert_wrapper import mineru_convert_to_md
 from scripts.pipeline import build_graph
+from scripts.llm import call_llm
 
 def check_keys(selected_model: str):
     """Check if mandatory API Keys are configured based on the selected model."""
@@ -20,6 +21,9 @@ def check_keys(selected_model: str):
     
     if selected_model == "openai" and not OPENAI_API_KEY:
         missing.append("OPENAI_API_KEY")
+    
+    if selected_model == "deepseek" and not DEEPSEEK_API_KEY:
+        missing.append("DEEPSEEK_API_KEY")
     
     if missing:
         print(f"❌ Missing mandatory environment variables: {', '.join(missing)}")
@@ -39,6 +43,8 @@ def main():
     parser.add_argument("--mode", choices=["habit", "original"],
                         default="original", help="Conversion mode: habit (Your Writing Habits/Stein Style) | original (Strict Reproduction, Default)")
     parser.add_argument("--list-templates", action="store_true", help="List all available templates")
+    parser.add_argument("--force-clean", action="store_true", help="Force re-run of Markdown cleaning even if cache exists")
+    parser.add_argument("--clean-model", default="deepseek-v4", help="Model to use for Markdown cleaning (default: deepseek-v4)")
     args = parser.parse_args()
 
     if args.list_templates:
@@ -83,11 +89,63 @@ def main():
             print(f"❌ MinerU conversion failed: {e}")
             sys.exit(1)
 
+    # Step 1: Markdown Cleaning (DeepSeek or Other)
+    print(f"\n[Step 1] Markdown Cleaning & Math Standardizing ({args.clean_model})")
+    cleaned_path = Path(markdown_path).with_suffix(".cleaned.md")
+    
+    if cleaned_path.exists() and not args.force_clean:
+        print(f"  [Cache Hit] Using existing cleaned Markdown: {cleaned_path.name}")
+        markdown_path = str(cleaned_path)
+    else:
+        if args.force_clean:
+            print(f"  [Force] Re-cleaning Markdown as requested...")
+        raw_md = Path(markdown_path).read_text(encoding="utf-8")
+        
+        clean_system = (
+            "### ROLE: PRECISION MARKDOWN CLEANER\n"
+            "Your task is to sanitize Markdown while PROTECTING ALL IMAGES.\n\n"
+            "### [TOP PRIORITY] ABSOLUTE IMAGE PRESERVATION:\n"
+            "1. NEVER delete, skip, or modify any Markdown image syntax: ![](images/...)\n"
+            "2. If an image tag is inside an HTML container (like <details> or <table>) that you are removing, you MUST RESCUE the image tag and place it in the output exactly where it was contextually.\n\n"
+            "### CLEANING RULES:\n"
+            "1. REMOVE all CSS code, <style> tags, or inline style='...' attributes.\n"
+            "2. STRIP HTML TAGS: Remove tags like <details>, <summary>, <div>, <span>. KEEP the meaningful text, code blocks, AND images inside them.\n"
+            "3. COMPACT MATH: Ensure ZERO SPACES inside math formulas. Example: $a+b=c$ (NOT $a + b = c$).\n"
+            "4. UNICODE TO LATEX: Convert Unicode symbols (σ, α, β, Δ, ≈, ≠, ≤) to LaTeX commands ($\\sigma$, $\\alpha$, etc.) wrapped in $.\n"
+            "5. AGGRESSIVE WRAPPING: Wrap all plain-text variables like 'y=0' into '$y=0$'.\n"
+            "6. PROOF QED: Ensure every 'Proof.' section ends with a '□' symbol.\n\n"
+            "### OUTPUT:\n"
+            "Output ONLY the cleaned Markdown text. If you delete an image tag, you have FAILED the mission."
+        )
+        
+        try:
+            # Use specified model for cleaning
+            cleaned_md = call_llm(args.clean_model, clean_system, raw_md, temperature=0.0)
+            
+            # Save cleaned version
+            cleaned_path.write_text(cleaned_md, encoding="utf-8")
+            markdown_path = str(cleaned_path)
+            print(f"  ✓ Markdown cleaned and saved: {cleaned_path.name}")
+        except Exception as e:
+            print(f"  [Warning] Markdown cleaning failed, proceeding with raw output: {e}")
+
     # Step 2: Run LangGraph Pipeline
+    content_list_path = str(cache_dir / f"{pdf_path.stem}_content_list.json")
+    if not os.path.exists(content_list_path):
+        # Fallback to search if name differs or has version suffix
+        found = list(cache_dir.glob("*content_list*.json"))
+        if found:
+            content_list_path = str(found[0])
+            print(f"  [Config] Found content list: {Path(content_list_path).name}")
+        else:
+            print(f"  [Warning] Content list JSON not found in {cache_dir}. Image analysis will be limited.")
+            content_list_path = ""
+
     graph = build_graph()
     initial_state = {
         "pdf_path":        str(pdf_path),
         "markdown_path":   markdown_path,
+        "content_list_path": content_list_path,
         "template_name":   args.template,
         "model_name":      args.model,
         "mode":            args.mode,

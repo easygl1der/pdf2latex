@@ -10,6 +10,7 @@ import operator
 # ── API Keys ──────────────────────────────────────────────────
 MINERU_API_KEY  = os.getenv("MINERU_API_KEY",  "")
 OPENAI_API_KEY  = os.getenv("OPENAI_API_KEY",  "")
+DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY", "")
 
 # ── Model Configuration ───────────────────────────────────────
 OLLAMA_BASE_URL   = os.getenv("OLLAMA_BASE_URL",   "http://localhost:11434/v1")
@@ -26,19 +27,37 @@ MODELS = {
         "base_url":   OLLAMA_BASE_URL,
         "api_key":    lambda: "ollama",
         "model":      OLLAMA_MODEL_NAME, # Default: nemotron-3-super:cloud
-        "max_tokens": 30000,
+        "max_tokens": 10000,
     },
     "deepseek": {
+        "base_url":   "https://api.deepseek.com",
+        "api_key":    lambda: DEEPSEEK_API_KEY,
+        "model":      "deepseek-chat",
+        "max_tokens": 8192,
+    },
+    "deepseek-v4": {
         "base_url":   OLLAMA_BASE_URL,
         "api_key":    lambda: "ollama",
         "model":      "deepseek-v4-flash:cloud",
-        "max_tokens": 64000, # Model limit is ~65k
+        "max_tokens": 64000, 
     },
     "gemini": {
         "base_url":   OLLAMA_BASE_URL,
         "api_key":    lambda: "ollama",
         "model":      "gemini-3-flash-preview:cloud",
         "max_tokens": 64000, # Large output limit
+    },
+    "gemma-vision": {
+        "base_url":   OLLAMA_BASE_URL,
+        "api_key":    lambda: "ollama",
+        "model":      "gemma4:31b-cloud",
+        "max_tokens": 18000,
+    },
+    "gpt-oss": {
+        "base_url":   OLLAMA_BASE_URL,
+        "api_key":    lambda: "ollama",
+        "model":      "gpt-oss:120b-cloud",
+        "max_tokens": 32000,
     }
 }
 
@@ -61,8 +80,14 @@ TEMPLATES: Dict[str, TemplateInfo] = {
         "preamble": r"""\documentclass{amsart}
 \usepackage{amsmath, amssymb, amsthm}
 \usepackage{fontspec}
-\usepackage{xeCJK}
-\setCJKmainfont{SimSun}
+\usepackage[fontset=mac, scheme=plain]{ctex}
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{caption}
+\usepackage{float}
+\usepackage{multirow}
+\usepackage{algorithm}
+\usepackage{algpseudocode}
 \usepackage{hyperref}
 \usepackage{cleveref}
 
@@ -83,26 +108,21 @@ TEMPLATES: Dict[str, TemplateInfo] = {
 \maketitle
 \tableofcontents
 __BODY__
+
+\bibliographystyle{plain}
+\bibliography{refs}
 \end{document}
 """,
-        "style_hint": "Use AMS style: theorem/lemma/definition/remark environments, math in align* or equation.",
+        "style_hint": "Use AMS style: theorem/lemma/definition/remark environments, math in align* or equation. ALWAYS use \caption and \label for figures/tables.",
         "detailed_instructions": r"""
 ### AMSART Template Specific Instructions:
-1. **Theorem Environments**: Use the following standard environments:
-   - \begin{theorem}...\end{theorem} for main results.
-   - \begin{lemma}...\end{lemma}, \begin{proposition}...\end{proposition}, \begin{corollary}...\end{corollary} for supporting results.
-   - \begin{definition}...\end{definition} for formal definitions.
-   - \begin{example}...\end{example} for illustrative examples.
-   - \begin{remark}...\end{remark} for comments or observations.
-   - \begin{proof}...\end{proof} for proofs (automatically adds QED symbol).
-2. **Math Formatting**:
-   - Prefer `align*` for unnumbered multi-line equations and `equation` for single-line numbered equations.
-   - Use `\mathbf` for bold vectors and `\mathbb` for sets (R, C, N, etc.).
-3. **Structure**: 
-   - Use `\section` as the primary heading level. 
-   - Do NOT use `\chapter` as amsart does not support it.
-4. **References**:
-   - Use `\cref{...}` for all cross-references to theorems, definitions, and sections.
+1. **Figures and Tables**:
+   - ALWAYS use `\begin{figure}[H]` or `\begin{table}[H]` with the `float` package.
+   - Every figure/table MUST have a `\caption{...}` and a `\label{figure:xxx}` or `\label{table:xxx}`.
+   - Use `\includegraphics[width=0.8\textwidth]{...}` to ensure images fit the page.
+   - For tables, use `booktabs` commands: `\toprule`, `\midrule`, `\bottomrule`.
+2. **Theorem Environments**: Use standard AMS environments.
+3. **Math Formatting**: Prefer `align*` for equations.
 """
     },
 
@@ -110,11 +130,17 @@ __BODY__
         "desc": "Standard Article — Clean and general-purpose, suitable for textbook notes.",
         "preamble": r"""\documentclass[12pt, a4paper]{article}
 \usepackage{fontspec}
-\usepackage{xeCJK}
-\setCJKmainfont{SimSun}
+\usepackage[fontset=mac, scheme=plain]{ctex}
 \usepackage{amsmath, amssymb, amsthm}
 \usepackage{geometry}
 \geometry{top=2.5cm, bottom=2.5cm, left=3cm, right=3cm}
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{caption}
+\usepackage{float}
+\usepackage{multirow}
+\usepackage{algorithm}
+\usepackage{algpseudocode}
 \usepackage{hyperref, xcolor, enumitem}
 \usepackage{cleveref}
 
@@ -138,22 +164,14 @@ __BODY__
 \bibliography{refs}
 \end{document}
 """,
-        "style_hint": "Use standard article style: section/subsection hierarchy, English theorem names.",
+        "style_hint": "Use standard article style: section/subsection hierarchy, English theorem names. ALWAYS use \caption and \label for figures/tables.",
         "detailed_instructions": r"""
 ### Standard Article Template Specific Instructions:
-1. **Theorem Environments**:
-   - \begin{theorem}...\end{theorem}
-   - \begin{lemma}...\end{lemma}
-   - \begin{definition}...\end{definition}
-   - \begin{remark}...\end{remark} (Note: this is an unnumbered environment).
-2. **Structural Levels**:
-   - Start with `\section`. 
-   - Use `\subsection` and `\subsubsection` for nested content.
-3. **Formatting**:
-   - Use `itemize` or `enumerate` for lists, with `enumitem` support for custom labeling if needed.
-   - Wrap large code or pseudo-code in `verbatim` or `quote` if formatting is critical.
-4. **Math**:
-   - Standard LaTeX math environments: `\[ ... \]`, `equation`, `align`.
+1. **Figures and Tables**:
+   - ALWAYS use `\begin{figure}[H]` or `\begin{table}[H]`.
+   - Every figure/table MUST have a `\caption{...}` and a `\label{figure:xxx}` or `\label{table:xxx}`.
+   - For tables, use `booktabs` (toprule/midrule/bottomrule).
+2. **Structural Levels**: Start with `\section`.
 """
     },
 
@@ -163,7 +181,14 @@ __BODY__
 \usepackage{amsmath, amssymb, amsthm}
 \usepackage{geometry}
 \geometry{margin=2.5cm}
-\usepackage{hyperref, xcolor}
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{caption}
+\usepackage{float}
+\usepackage{multirow}
+\usepackage{algorithm}
+\usepackage{algpseudocode}
+\usepackage{hyperref}
 \usepackage{cleveref}
 
 \newtheorem{theorem}{定理}[section]
@@ -182,23 +207,17 @@ __BODY__
 \tableofcontents
 \newpage
 __BODY__
+
+\bibliographystyle{plain}
+\bibliography{refs}
 \end{document}
 """,
         "style_hint": "Use CTeX style: Chinese environment names, section/subsection hierarchy.",
         "detailed_instructions": r"""
 ### CTeX Article Template Specific Instructions:
-1. **Chinese Environment Names**: 
-   - \begin{theorem} renders as "定理".
-   - \begin{lemma} renders as "引理".
-   - \begin{definition} renders as "定义".
-   - \begin{example} renders as "例".
-   - \begin{remark} renders as "注记".
-2. **Typesetting**:
-   - Sections are titled "第1节", etc., automatically.
-   - Use standard `\section`, `\subsection` commands.
-3. **Math and Symbols**:
-   - Mathematical content remains in standard LaTeX notation ($...$).
-   - Ensure punctation inside math is consistent with LaTeX standards.
+1. **Figures and Tables**:
+   - ALWAYS use `\begin{figure}[H]` or `\begin{table}[H]`.
+   - Every figure/table MUST have a `\caption{...}` and a `\label{figure:xxx}` or `\label{table:xxx}`.
 """
     },
 
@@ -206,9 +225,10 @@ __BODY__
         "desc": "Beamer Slides — For creating academic presentations.",
         "preamble": r"""\documentclass{beamer}
 \usepackage{fontspec}
-\usepackage{xeCJK}
-\setCJKmainfont{SimSun}
+\usepackage[fontset=mac, scheme=plain]{ctex}
 \usepackage{amsmath, amssymb}
+\usepackage{graphicx}
+\usepackage{caption}
 \usetheme{Madrid}
 \usecolortheme{default}
 
@@ -229,18 +249,8 @@ __BODY__
         "style_hint": "Use Beamer style: each key point as a frame, use block environments for emphasis.",
         "detailed_instructions": r"""
 ### Beamer Presentation Template Specific Instructions:
-1. **Frame Structure**:
-   - Every slide must be wrapped in a `\begin{frame}{Frame Title} ... \end{frame}`.
-   - Do NOT just output text without a frame environment.
-2. **Highlighting**:
-   - Use `\begin{block}{Block Title} ... \end{block}` for important theorems, definitions, or summaries.
-   - Use `\begin{alertblock}{...}` for warnings or critical notes.
-   - Use `\begin{exampleblock}{...}` for examples.
-3. **Hierarchy**:
-   - `\section{...}` and `\subsection{...}` will update the progress bar/sidebar but should be used sparingly between frames.
-4. **Lists**:
-   - Use `itemize` or `enumerate`. Beamer styles these automatically.
-   - Use `\pause` to reveal list items sequentially if appropriate for the content flow.
+1. **Frames**: Every slide must be wrapped in a `\begin{frame}{...} ... \end{frame}`.
+2. **Images**: Use `\begin{figure} \centering \includegraphics[height=0.6\textheight]{...} \end{figure}`.
 """
     },
 }
@@ -263,6 +273,7 @@ class ChapterOutput(TypedDict):
 class PipelineState(TypedDict):
     pdf_path:        str
     markdown_path:   str
+    content_list_path: str
     template_name:   str
     model_name:      str
     mode:            str   # "notes" | "original"
@@ -277,9 +288,11 @@ class PipelineState(TypedDict):
 class WriterInput(TypedDict):
     chapter:       Chapter
     markdown_path: str
+    content_list_path: str
     all_titles:    List[str]
     template_name: str
     model_name:    str
     mode:          str
     doc_type:      str
     output_dir:    str
+    pdf_path:      str
