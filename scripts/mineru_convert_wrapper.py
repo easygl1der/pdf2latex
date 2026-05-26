@@ -8,7 +8,7 @@ def mineru_convert_to_md(pdf_path: str, output_dir: Path) -> str:
     converter = MinerUConverter(MINERU_API_KEY)
     result = converter.convert(
         input_path=pdf_path,
-        output_dir=str(output_dir / "mineru_output"),
+        output_dir=str(output_dir),
         verbose=True
     )
     if result["success"]:

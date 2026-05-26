@@ -64,7 +64,7 @@ def main():
     print(f"\n[Step 0] MinerU Transcription")
     output_root = Path("output")
     cache_dir = output_root / pdf_path.stem
-    cache_file = cache_dir / "mineru_output" / f"{pdf_path.stem}.md"
+    cache_file = cache_dir / f"{pdf_path.stem}.md"
 
     if cache_file.exists():
         print(f"  [Cache Hit] Skipping API call, reading {cache_file}")
