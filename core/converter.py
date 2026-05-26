@@ -13,22 +13,31 @@ class NextGenConverter:
         self.context_memory = ""
 
     def convert(self, markdown_path: str, output_dir: Path):
+        import time
+        t0 = time.time()
         content = Path(markdown_path).read_text(encoding="utf-8")
         title = Path(markdown_path).stem
         
         print(f"\n[1/4] Analyzing Structure...")
         chapters = self._split_chapters(content)
-        print(f"  - Found {len(chapters)} sections.")
+        t1 = time.time()
+        print(f"  - Found {len(chapters)} sections. ({t1-t0:.2f}s)")
 
-        print(f"\n[2/4] Converting Fragments (Parallel)...")
+        print(f"\n[2/4] Converting Fragments & Bib (Parallel)...")
         # Use ThreadPoolExecutor for speed
-        with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
-            # Provide global context (doc start) to help model maintain consistency
-            global_context = content[:2000]
+        # Reduced workers to 4 to avoid overloading the local proxy/Ollama
+        with concurrent.futures.ThreadPoolExecutor(max_workers=4) as executor:
+            # Task 1: Fragments
+            global_context = content[:1000] 
             future_to_ch = {
                 executor.submit(self._convert_fragment, ch['content'], ch['title'], global_context): ch 
                 for ch in chapters
             }
+
+            
+            # Task 2: Bibliography (Parallel with fragments)
+            bib_future = executor.submit(self._extract_bibliography, content)
+            
             results = []
             for future in concurrent.futures.as_completed(future_to_ch):
                 ch = future_to_ch[future]
@@ -38,20 +47,25 @@ class NextGenConverter:
                     print(f"    ✓ Done: {ch['title']}")
                 except Exception as exc:
                     print(f"    ❌ Failed: {ch['title']} - {exc}")
-        
+            
+            bib_content = bib_future.result()
+
+        t2 = time.time()
+        print(f"  - Fragment conversion finished. ({t2-t1:.2f}s)")
+
         # Sort back to original order
         results.sort(key=lambda x: x["index"])
         full_body = "\n".join(r["body"] for r in results)
 
-        print(f"\n[3/4] Handling Bibliography...")
-        bib_content = self._extract_bibliography(content)
         if bib_content:
             (output_dir / "refs.bib").write_text(bib_content, encoding="utf-8")
             print("  - Generated refs.bib")
 
-        print(f"\n[4/4] Assembling & Repairing...")
+        print(f"\n[3/4] Assembling & Repairing...")
         final_latex = self._assemble(title, full_body, bool(bib_content))
         final_latex = self._surgical_repair(final_latex)
+        t3 = time.time()
+        print(f"  - Assembly finished. ({t3-t2:.2f}s)")
         
         main_tex = output_dir / "main.tex"
         main_tex.write_text(final_latex, encoding="utf-8")
@@ -63,19 +77,38 @@ class NextGenConverter:
         if not matches:
             return [{"title": "Main", "content": content}]
         
-        chapters = []
+        raw_chapters = []
         for i, m in enumerate(matches):
             start = m.end()
             end = matches[i+1].start() if i+1 < len(matches) else len(content)
-            chapters.append({
+            raw_chapters.append({
                 "title": m.group(1).strip(),
                 "content": content[start:end].strip()
             })
-        return chapters
+        
+        # Optimization: Merge small chapters (under 500 chars) into the next one
+        merged = []
+        current = None
+        for ch in raw_chapters:
+            if current is None:
+                current = ch
+            elif len(current["content"]) < 500:
+                current["title"] += " and " + ch["title"]
+                current["content"] += "\n\n" + ch["content"]
+            else:
+                merged.append(current)
+                current = ch
+        if current:
+            merged.append(current)
+        
+        return merged
 
     def _convert_fragment(self, fragment: str, title: str, global_context: str = "") -> str:
-        system = f"Convert Markdown to LaTeX body for {self.template['name']}. Mode: {self.mode}. Return ONLY the body content. Use standard LaTeX environments. Do NOT include preamble, documentclass, or document tags."
-        user = f"Overall Doc Context:\n{global_context}\n\nTarget Section: {title}\n\nContent:\n{fragment}"
+        # Optimization: Only send context if fragment is large or complex
+        ctx_inject = f"Context: {global_context}\n\n" if len(fragment) > 1000 else ""
+        
+        system = f"Markdown to LaTeX body for {self.template['name']} ({self.mode}). Return ONLY body content."
+        user = f"{ctx_inject}Section: {title}\nContent:\n{fragment}"
         res = self.provider.call(system, user)
         res = re.sub(r'```(?:latex)?\n?', '', res)
         res = re.sub(r'\n?```', '', res)
@@ -117,7 +150,7 @@ class NextGenConverter:
         if len(parts) > 2:
             latex = parts[0] + r'\begin{document}' + "".join(parts[1:]).replace(r'\begin{document}', '')
         
-        # 2. Fix unclosed environments (very basic)
+        # 2. Fix unclosed environments
         envs = ["itemize", "enumerate", "figure", "table", "align", "equation"]
         for env in envs:
             opens = latex.count(f"\\begin{{{env}}}")
@@ -125,4 +158,10 @@ class NextGenConverter:
             if opens > closes:
                 latex += f"\n\\end{{{env}}}" * (opens - closes)
         
+        # 3. Escape '&' in sections (common when merging)
+        # Match \section{... & ...} and replace & with \&
+        def escape_amp(m):
+            return m.group(0).replace('&', r'\&')
+        latex = re.sub(r'\\section\{[^}]*&[^}]*\}', escape_amp, latex)
+
         return latex

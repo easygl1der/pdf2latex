@@ -46,18 +46,24 @@ def main():
 
     # 3. Conversion
     try:
+        import time
+        start_conv = time.time()
         provider = get_provider(args.model)
         converter = NextGenConverter(provider, args.template, args.mode)
         main_tex = converter.convert(markdown_path, output_dir)
+        conv_duration = time.time() - start_conv
         
         # 4. Final Verification (Step 4)
         print(f"\n[Step 4] Compilation Check")
+        start_comp = time.time()
         cmd = ["xelatex", "-interaction=nonstopmode", "-halt-on-error", main_tex.name]
         print(f"  Running: {' '.join(cmd)}")
         proc = subprocess.run(cmd, cwd=output_dir, capture_output=True, text=True)
+        comp_duration = time.time() - start_comp
         
         if proc.returncode == 0:
             print(f"\n✅  SUCCESS!")
+            print(f"    Conversion: {conv_duration:.2f}s | Compilation: {comp_duration:.2f}s")
             print(f"    Output: {output_dir / 'main.pdf'}")
         else:
             print(f"\n⚠️  Compilation Warning (Code {proc.returncode})")
