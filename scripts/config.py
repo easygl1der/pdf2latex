@@ -9,22 +9,16 @@ import operator
 
 # ── API Keys ──────────────────────────────────────────────────
 MINERU_API_KEY  = os.getenv("MINERU_API_KEY",  "")
-OPENAI_API_KEY  = os.getenv("OPENAI_API_KEY",  "")
+OLLAMA_API_KEY  = os.getenv("OLLAMA_API_KEY",  "")
 
 # ── Model Configuration ───────────────────────────────────────
 OLLAMA_BASE_URL   = os.getenv("OLLAMA_BASE_URL",   "http://localhost:11434/v1")
-OLLAMA_MODEL_NAME = os.getenv("OLLAMA_MODEL_NAME", "nemotron-3-super:cloud")
+OLLAMA_MODEL_NAME = os.getenv("OLLAMA_MODEL_NAME", "deepseek-v4-pro:cloud")
 
 MODELS = {
-    "openai": {
-        "base_url":   "https://api.openai.com/v1",
-        "api_key":    lambda: OPENAI_API_KEY,
-        "model":      "gpt-4o",
-        "max_tokens": 16384,
-    },
     "ollama": {
         "base_url":   OLLAMA_BASE_URL,
-        "api_key":    lambda: "ollama",
+        "api_key":    lambda: OLLAMA_API_KEY,
         "model":      OLLAMA_MODEL_NAME,
         "max_tokens": 20000,
     },

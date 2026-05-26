@@ -8,7 +8,7 @@ import os
 import sys
 from pathlib import Path
 
-from scripts.config import TEMPLATES, MINERU_API_KEY, OPENAI_API_KEY
+from scripts.config import TEMPLATES, MINERU_API_KEY, OLLAMA_API_KEY
 from scripts.mineru_convert_wrapper import mineru_convert_to_md
 from scripts.pipeline import build_graph
 
@@ -18,8 +18,8 @@ def check_keys(selected_model: str):
     if not MINERU_API_KEY:
         missing.append("MINERU_API_KEY")
     
-    if selected_model == "openai" and not OPENAI_API_KEY:
-        missing.append("OPENAI_API_KEY")
+    if selected_model == "ollama" and not OLLAMA_API_KEY:
+        missing.append("OLLAMA_API_KEY")
     
     if missing:
         print(f"❌ Missing mandatory environment variables: {', '.join(missing)}")
@@ -33,7 +33,7 @@ def main():
     parser.add_argument("pdf", help="Input PDF path")
     parser.add_argument("--template", choices=list(TEMPLATES.keys()),
                         default="amsart", help="LaTeX template (default: amsart)")
-    parser.add_argument("--model", choices=["openai", "ollama"],
+    parser.add_argument("--model", choices=["ollama"],
                         default="ollama", help="LLM selection (default: ollama)")
     parser.add_argument("--mode", choices=["notes", "original"],
                         default="notes", help="Conversion mode: notes (Learning Notes) | original (Fidelity)")

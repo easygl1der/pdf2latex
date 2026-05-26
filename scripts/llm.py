@@ -1,50 +1,44 @@
-"""
-LLM Client Wrapper: get_client / call_llm
-
-Ollama is compatible with the OpenAI API via OLLAMA_BASE_URL / OLLAMA_MODEL_NAME.
-"""
-
-import sys
-from openai import OpenAI
+import os
+import requests
+import json
 from .config import MODELS
-
-_client_cache = {}
-
-def get_client(model_name: str) -> tuple:
-    if model_name not in _client_cache:
-        cfg = MODELS[model_name]
-        _client_cache[model_name] = (
-            OpenAI(api_key=cfg["api_key"](), base_url=cfg["base_url"]),
-            cfg["model"],
-            cfg.get("max_tokens", 8192),
-        )
-    return _client_cache[model_name]
 
 def call_llm(model_name: str, system: str, user: str, temperature: float = 0.3,
              show_thinking: bool = False) -> str:
-    client, model, max_tokens = get_client(model_name)
+    """
+    Robust LLM caller using 'requests' to avoid compatibility issues with local proxies.
+    """
+    cfg = MODELS[model_name]
+    url = f"{cfg['base_url']}/chat/completions"
+    api_key = cfg["api_key"]()
+    model = cfg["model"]
 
-    # Note: Nemotron-3-Super natively expects a prompt structure.
-    # We pass it as standard chat messages here.
-    stream = client.chat.completions.create(
-        model=model,
-        messages=[{"role": "system", "content": system},
-                  {"role": "user",   "content": user}],
-        temperature=temperature,
-        max_tokens=max_tokens,
-        stream=True,
-    )
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json"
+    }
 
-    raw_buf = []
+    payload = {
+        "model": model,
+        "messages": [
+            {"role": "system", "content": system},
+            {"role": "user", "content": user}
+        ],
+        "temperature": temperature,
+        "stream": False
+    }
 
-    for chunk in stream:
-        if not chunk.choices:
-            continue
-        piece = chunk.choices[0].delta.content or ""
-        if not piece:
-            continue
-        raw_buf.append(piece)
-        print(piece, end="", flush=True)
-
-    print("\n", flush=True)
-    return "".join(raw_buf)
+    try:
+        response = requests.post(url, headers=headers, json=payload, timeout=120)
+        response.raise_for_status()
+        result = response.json()
+        content = result["choices"][0]["message"]["content"]
+        
+        # Simple print for progress tracking
+        print(content[:100] + "..." if len(content) > 100 else content, flush=True)
+        return content
+    except Exception as e:
+        print(f"❌ LLM Call Failed: {e}")
+        if 'response' in locals() and response.text:
+            print(f"Response Detail: {response.text}")
+        raise
