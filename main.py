@@ -1,111 +1,71 @@
-"""
-pdf2latex — PDF to LaTeX Automatic Conversion Tool (Ollama + MinerU + LangGraph)
-Usage: python main.py input.pdf --template amsart --model ollama --mode notes
-"""
-
 import argparse
-import os
 import sys
+import subprocess
 from pathlib import Path
 
-from scripts.config import TEMPLATES, MINERU_API_KEY, OLLAMA_API_KEY
+from core.config import TEMPLATES, MINERU_API_KEY, OUTPUT_ROOT
+from core.llm import get_provider
+from core.converter import NextGenConverter
 from scripts.mineru_convert_wrapper import mineru_convert_to_md
-from scripts.pipeline import build_graph
-
-def check_keys(selected_model: str):
-    """Check if mandatory API Keys are configured based on the selected model."""
-    missing = []
-    if not MINERU_API_KEY:
-        missing.append("MINERU_API_KEY")
-    
-    if selected_model == "ollama" and not OLLAMA_API_KEY:
-        missing.append("OLLAMA_API_KEY")
-    
-    if missing:
-        print(f"❌ Missing mandatory environment variables: {', '.join(missing)}")
-        print("Please run in your terminal:")
-        for m in missing:
-            print(f"  export {m}='your_key_here'")
-        sys.exit(1)
 
 def main():
-    parser = argparse.ArgumentParser(description="PDF to LaTeX Automatic Conversion Tool")
+    parser = argparse.ArgumentParser(description="pdf2latex (Next-Gen) - Fast PDF to LaTeX")
     parser.add_argument("pdf", help="Input PDF path")
-    parser.add_argument("--template", choices=list(TEMPLATES.keys()),
-                        default="amsart", help="LaTeX template (default: amsart)")
-    parser.add_argument("--model", choices=["ollama"],
-                        default="ollama", help="LLM selection (default: ollama)")
-    parser.add_argument("--mode", choices=["notes", "original"],
-                        default="notes", help="Conversion mode: notes (Learning Notes) | original (Fidelity)")
-    parser.add_argument("--list-templates", action="store_true", help="List all available templates")
+    parser.add_argument("--template", choices=list(TEMPLATES.keys()), default="article")
+    parser.add_argument("--model", choices=["ollama", "codex"], default="ollama")
+    parser.add_argument("--mode", choices=["notes", "original"], default="notes")
     args = parser.parse_args()
 
-    if args.list_templates:
-        print("\nAvailable Templates:")
-        for k, v in TEMPLATES.items():
-            print(f"  {k:12s} — {v['desc']}")
-        return
-
-    check_keys(args.model)
-
+    # 1. Setup paths
     pdf_path = Path(args.pdf)
     if not pdf_path.exists():
         print(f"❌ File not found: {args.pdf}")
         sys.exit(1)
 
+    output_dir = OUTPUT_ROOT / pdf_path.stem
+    output_dir.mkdir(parents=True, exist_ok=True)
+
     print("=" * 60)
-    print(f"  pdf2latex (Model: {args.model})")
-    print(f"  PDF:    {pdf_path.name}")
-    print(f"  Template: {args.template} — {TEMPLATES[args.template]['desc']}")
-    print(f"  Mode:     {args.mode}")
+    print(f"  pdf2latex (Next-Gen) | Model: {args.model}")
+    print(f"  PDF: {pdf_path.name} | Mode: {args.mode}")
     print("=" * 60)
 
-    # Step 1: MinerU PDF to Markdown
+    # 2. Transcription (Step 0)
     print(f"\n[Step 0] MinerU Transcription")
-    output_root = Path("output")
-    cache_dir = output_root / pdf_path.stem
-    cache_file = cache_dir / f"{pdf_path.stem}.md"
-
+    cache_file = output_dir / f"{pdf_path.stem}.md"
     if cache_file.exists():
-        print(f"  [Cache Hit] Skipping API call, reading {cache_file}")
+        print(f"  [Cache Hit] Using existing Markdown: {cache_file}")
         markdown_path = str(cache_file)
     else:
         try:
-            markdown_path = mineru_convert_to_md(str(pdf_path), cache_dir)
+            markdown_path = mineru_convert_to_md(str(pdf_path), output_dir)
             print(f"  ✓ Transcription complete: {markdown_path}")
         except Exception as e:
-            print(f"❌ MinerU conversion failed: {e}")
+            print(f"❌ MinerU failed: {e}")
             sys.exit(1)
 
-    # Step 2: Run LangGraph Pipeline
-    graph = build_graph()
-    initial_state = {
-        "pdf_path":        str(pdf_path),
-        "markdown_path":   markdown_path,
-        "template_name":   args.template,
-        "model_name":      args.model,
-        "mode":            args.mode,
-        "doc_title":       "",
-        "doc_type":        "",
-        "output_dir":      "",
-        "chapters":        [],
-        "chapter_outputs": [],
-        "final_latex":     "",
-    }
-
-    print("\n[Pipeline] Starting LangGraph orchestration...")
+    # 3. Conversion
     try:
-        result = graph.invoke(initial_state)
-        print("\n" + "=" * 60)
-        print("  ✅  Task Complete!")
-        print(f"  Output Dir:  {result['output_dir']}")
-        print(f"  Main File:   {result['final_latex']}")
-        print(f"  Modular:     {Path(result['output_dir']) / 'main_modular.tex'}")
-        print("=" * 60)
+        provider = get_provider(args.model)
+        converter = NextGenConverter(provider, args.template, args.mode)
+        main_tex = converter.convert(markdown_path, output_dir)
+        
+        # 4. Final Verification (Step 4)
+        print(f"\n[Step 4] Compilation Check")
+        cmd = ["xelatex", "-interaction=nonstopmode", "-halt-on-error", main_tex.name]
+        print(f"  Running: {' '.join(cmd)}")
+        proc = subprocess.run(cmd, cwd=output_dir, capture_output=True, text=True)
+        
+        if proc.returncode == 0:
+            print(f"\n✅  SUCCESS!")
+            print(f"    Output: {output_dir / 'main.pdf'}")
+        else:
+            print(f"\n⚠️  Compilation Warning (Code {proc.returncode})")
+            print(f"    Check logs in: {output_dir / 'main.log'}")
+            # Optional: Add surgical repair here in next iteration
+
     except Exception as e:
-        print(f"\n❌ Pipeline execution error: {e}")
-        import traceback
-        traceback.print_exc()
+        print(f"\n❌ Execution Error: {e}")
         sys.exit(1)
 
 if __name__ == "__main__":
