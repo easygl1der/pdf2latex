@@ -1,9 +1,12 @@
 #!/bin/bash
 # ==============================================================================
-# PDF 首页视觉分析工具 (inspect_pdf.sh)
+# PDF 视觉深度分析工具 (inspect_pdf.sh)
 #
-# 将 PDF 的前三页转换为图片，发送给视觉大模型，识别 LaTeX 模板类型及关键元数据。
-# 输出包含模板信息、标题、作者、日期、机构等 \maketitle 所需的全部信息。
+# 同时分析 PDF 首页（模板/元数据）和末页（文献引用格式），两路 LLM 调用并行执行。
+#
+# 输出:
+#   - 前三页: LaTeX 模板类型、\maketitle 所需字段（标题/作者/日期/机构等）
+#   - 后三页: 引用格式识别（IEEE/APA/...）、bibtex 包建议、引用样例
 #
 # 💡 使用方式:
 #   ./inspect_pdf.sh pdf/test-6.pdf
@@ -17,10 +20,11 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 DEFAULT_MODEL="gemma4:31b-cloud"
 DEFAULT_PROXY="socks5://127.0.0.1:1080"
-MAX_PAGES=3
-DPI=150  # 分辨率：150dpi 足够 LLM 识别文字，同时控制 base64 大小
+FRONT_PAGES=3   # 前几页
+BACK_PAGES=3    # 后几页
+DPI=150
 
-# --- 视觉模型列表（必须支持图片输入）---
+# --- 视觉模型列表 ---
 VISION_MODELS=(
     "gemma4:31b-cloud"
     "gemini-3-flash-preview:cloud"
@@ -45,17 +49,14 @@ PDF_INPUT="$1"
 MODEL=""
 USE_PROXY="true"
 
-# 从参数中识别模型和代理选项
 for arg in "${@:2}"; do
     if [ "$arg" = "--no-proxy" ] || [ "$arg" = "-np" ] || [ "$arg" = "noproxy" ]; then
         USE_PROXY="false"
     elif [[ "$arg" == *cloud* ]] || [[ "$arg" == *:latest ]]; then
-        # Match any model name containing "cloud" (e.g. gemma4:31b-cloud, gemini-3-flash-preview:cloud)
         MODEL="$arg"
     fi
 done
 
-# 未指定模型时交互选择
 if [ -z "$MODEL" ]; then
     echo "=========================================================================="
     echo "💡 请选择视觉分析模型 (需支持图片输入):"
@@ -84,66 +85,132 @@ if ! command -v pdftoppm &> /dev/null; then
     exit 1
 fi
 
-BASENAME=$(basename "${PDF_INPUT%.pdf}")
-PROXY_VAL="${ALL_PROXY:-$DEFAULT_PROXY}"
-[ "$USE_PROXY" = "false" ] && PROXY_STATUS="禁用" || PROXY_STATUS="启用 ($PROXY_VAL)"
+if ! command -v pdfinfo &> /dev/null; then
+    echo "错误: 需要 pdfinfo (poppler)。请运行: brew install poppler"
+    exit 1
+fi
+
+# 获取 PDF 总页数
+TOTAL_PAGES=$(pdfinfo "$PDF_INPUT" 2>/dev/null | grep "^Pages:" | awk '{print $2}')
+if [ -z "$TOTAL_PAGES" ] || [ "$TOTAL_PAGES" -lt 1 ]; then
+    echo "错误: 无法读取 PDF 页数"
+    exit 1
+fi
+
+# 计算后几页的起始页（不与前几页重叠）
+BACK_START=$(( TOTAL_PAGES - BACK_PAGES + 1 ))
+if [ "$BACK_START" -le "$FRONT_PAGES" ]; then
+    BACK_START=$(( FRONT_PAGES + 1 ))
+fi
+# 如果总页数不够，从第 FRONT_PAGES+1 页开始
+if [ "$BACK_START" -gt "$TOTAL_PAGES" ]; then
+    BACK_START="$TOTAL_PAGES"
+fi
+
+[ "$USE_PROXY" = "false" ] && PROXY_STATUS="禁用" || PROXY_STATUS="启用 (${ALL_PROXY:-$DEFAULT_PROXY})"
 
 echo "=========================================================="
-echo "    🔍  PDF 首页视觉分析工具"
+echo "    🔍  PDF 视觉深度分析工具（首尾并行）"
 echo "=========================================================="
-echo " PDF 文件: $PDF_INPUT"
-echo " 视觉模型: $MODEL"
-echo " 提取页数: 前 $MAX_PAGES 页 @ ${DPI}dpi"
-echo " 代理状态: $PROXY_STATUS"
+echo " PDF 文件:  $PDF_INPUT"
+echo " 总页数:    $TOTAL_PAGES 页"
+echo " 视觉模型:  $MODEL"
+echo " 前段分析:  第 1 ~ $FRONT_PAGES 页  → 模板 / 元数据"
+echo " 后段分析:  第 $BACK_START ~ $TOTAL_PAGES 页 → 引用格式"
+echo " 代理状态:  $PROXY_STATUS"
 echo "=========================================================="
 
-# --- Step 1: PDF 前三页 → JPG ---
+# --- Step 1: 提取图片（首页 + 末页）---
 TMPDIR=$(mktemp -d)
 trap "rm -rf '$TMPDIR'" EXIT
 
 echo ""
-echo ">>> [步骤 1/3] 提取 PDF 前 $MAX_PAGES 页为图片..."
-pdftoppm -jpeg -r "$DPI" -f 1 -l "$MAX_PAGES" "$PDF_INPUT" "$TMPDIR/page"
+echo ">>> [步骤 1/3] 提取 PDF 首尾页面为图片..."
 
-PAGE_FILES=()
-for f in "$TMPDIR"/page-*.jpg "$TMPDIR"/page-*-*.jpg; do
-    [ -f "$f" ] && PAGE_FILES+=("$f")
+# 提取前几页
+pdftoppm -jpeg -r "$DPI" -f 1 -l "$FRONT_PAGES" "$PDF_INPUT" "$TMPDIR/front"
+
+# 提取后几页
+pdftoppm -jpeg -r "$DPI" -f "$BACK_START" -l "$TOTAL_PAGES" "$PDF_INPUT" "$TMPDIR/back"
+
+# 整理前几页文件列表（排序取前 N 张）
+FRONT_FILES=()
+for f in "$TMPDIR"/front-*.jpg; do
+    [ -f "$f" ] && FRONT_FILES+=("$f")
 done
-
-# 按文件名排序，只取前三张
-IFS=$'\n' PAGE_FILES=($(printf '%s\n' "${PAGE_FILES[@]}" | sort | head -n "$MAX_PAGES"))
+IFS=$'\n' FRONT_FILES=($(printf '%s\n' "${FRONT_FILES[@]}" | sort | head -n "$FRONT_PAGES"))
 unset IFS
 
-if [ ${#PAGE_FILES[@]} -eq 0 ]; then
-    echo "错误: pdftoppm 未能生成图片文件，请检查 PDF 文件是否有效"
-    exit 1
-fi
-
-echo ">>> 成功提取 ${#PAGE_FILES[@]} 张页面图片"
-for f in "${PAGE_FILES[@]}"; do
-    SIZE=$(du -sh "$f" 2>/dev/null | cut -f1)
-    echo "    - $(basename "$f") ($SIZE)"
+# 整理后几页文件列表
+BACK_FILES=()
+for f in "$TMPDIR"/back-*.jpg; do
+    [ -f "$f" ] && BACK_FILES+=("$f")
 done
+IFS=$'\n' BACK_FILES=($(printf '%s\n' "${BACK_FILES[@]}" | sort | head -n "$BACK_PAGES"))
+unset IFS
 
-# --- Step 2: 图片 → Base64，调用视觉 API ---
-echo ""
-echo ">>> [步骤 2/3] 正在将图片编码并发送给 $MODEL..."
+echo "    [前段] 提取 ${#FRONT_FILES[@]} 张: $(basename "${FRONT_FILES[@]}" | tr '\n' ' ')"
+echo "    [后段] 提取 ${#BACK_FILES[@]} 张: $(basename "${BACK_FILES[@]}" | tr '\n' ' ')"
 
-# 调用独立 Python 脚本（避免 heredoc 转义问题，urllib 不支持 socks5，Ollama 本地直连即可）
-python3 "$SCRIPT_DIR/scripts/vision_inspect.py" "$MODEL" "${PAGE_FILES[@]}" > "$TMPDIR/llm_output.txt"
-STATUS=$?
-
-if [ $STATUS -ne 0 ]; then
-    echo "错误: 视觉模型调用失败，请检查 Ollama 服务状态和模型名称"
+if [ ${#FRONT_FILES[@]} -eq 0 ] && [ ${#BACK_FILES[@]} -eq 0 ]; then
+    echo "错误: 未能提取任何图片"
     exit 1
 fi
 
-# --- Step 3: 输出结果 ---
+# --- Step 2: 并行调用两个 LLM 任务 ---
 echo ""
-echo ">>> [步骤 3/3] 分析结果:"
-echo "=========================================================="
-cat "$TMPDIR/llm_output.txt"
+echo ">>> [步骤 2/3] 并行发送首页(模板分析) + 末页(引用分析) 给 $MODEL..."
+
+# 并行启动两个后台 Python 进程
+python3 "$SCRIPT_DIR/scripts/vision_inspect.py" --mode front "$MODEL" "${FRONT_FILES[@]}" \
+    > "$TMPDIR/front_output.txt" 2> "$TMPDIR/front_log.txt" &
+PID_FRONT=$!
+
+python3 "$SCRIPT_DIR/scripts/vision_inspect.py" --mode back "$MODEL" "${BACK_FILES[@]}" \
+    > "$TMPDIR/back_output.txt" 2> "$TMPDIR/back_log.txt" &
+PID_BACK=$!
+
+echo "    [front PID=$PID_FRONT] 首页分析已启动..."
+echo "    [back  PID=$PID_BACK] 末页分析已启动..."
+echo "    等待两路分析完成（并行进行中）..."
+
+# 等待两个任务都结束
+wait $PID_FRONT
+STATUS_FRONT=$?
+wait $PID_BACK
+STATUS_BACK=$?
+
+# 输出进度日志
+[ -s "$TMPDIR/front_log.txt" ] && cat "$TMPDIR/front_log.txt"
+[ -s "$TMPDIR/back_log.txt"  ] && cat "$TMPDIR/back_log.txt"
+
+# --- Step 3: 输出合并结果 ---
 echo ""
 echo "=========================================================="
-echo "✅ 分析完成！"
+echo "📄 首页分析结果  —  LaTeX 模板 & 元数据"
+echo "=========================================================="
+if [ $STATUS_FRONT -eq 0 ] && [ -s "$TMPDIR/front_output.txt" ]; then
+    cat "$TMPDIR/front_output.txt"
+else
+    echo "❌ 首页分析失败 (exit code $STATUS_FRONT)"
+fi
+
+echo ""
+echo "=========================================================="
+echo "📚 末页分析结果  —  引用 / 参考文献格式"
+echo "=========================================================="
+if [ $STATUS_BACK -eq 0 ] && [ -s "$TMPDIR/back_output.txt" ]; then
+    cat "$TMPDIR/back_output.txt"
+else
+    echo "❌ 末页分析失败 (exit code $STATUS_BACK)"
+fi
+
+echo ""
+echo "=========================================================="
+if [ $STATUS_FRONT -eq 0 ] && [ $STATUS_BACK -eq 0 ]; then
+    echo "✅ 首尾并行分析全部完成！"
+else
+    echo "⚠️  部分分析失败，请检查上方输出"
+    exit 1
+fi
 echo "=========================================================="
