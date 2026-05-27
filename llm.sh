@@ -19,12 +19,20 @@ usage() {
     echo "            Ollama LLM Client Helper Script               "
     echo "=========================================================="
     echo "用法:"
-    echo "  $0 <提示词/Prompt> [模型名称] [图片路径]"
+    echo "  $0 <提示词/Prompt> [模型名称] [图片路径] [代理选项]"
     echo ""
-    echo "智能参数自动识别示例:"
-    echo "  1. 仅提示词:   $0 \"你好，请自我介绍\""
-    echo "  2. 提示词+图片: $0 \"这张图里有什么？\" ./test.jpg"
-    echo "  3. 指定模型:   $0 \"分析图片\" gemini-3-flash-preview:cloud ./test.jpg"
+    echo "智能参数自动识别及代理配置示例:"
+    echo "  1. 仅提示词 (默认使用代理):"
+    echo "     $0 \"你好，请自我介绍\""
+    echo ""
+    echo "  2. 不使用代理 (使用 -np 或 --no-proxy 标志):"
+    echo "     $0 \"本地局域网问答\" -np"
+    echo ""
+    echo "  3. 提示词+图片+不使用代理:"
+    echo "     $0 \"这张图里有什么？\" ./test.jpg --no-proxy"
+    echo ""
+    echo "  4. 环境变量控制代理:"
+    echo "     USE_PROXY=false $0 \"快捷问答\""
     echo ""
     echo "支持的模型:"
     for m in "${MODELS[@]}"; do
@@ -39,6 +47,29 @@ if [ $# -lt 1 ]; then
     usage
 fi
 
+# 1. 检查环境变量 USE_PROXY
+USE_PROXY_DECIDED=""
+if [ "$USE_PROXY" = "false" ]; then
+    USE_PROXY_DECIDED="false"
+elif [ "$USE_PROXY" = "true" ]; then
+    USE_PROXY_DECIDED="true"
+fi
+
+# 2. 从命令行参数中提取代理控制标志 (--no-proxy, -np, noproxy)
+TEMP_ARGS=()
+for arg in "$@"; do
+    if [ "$arg" = "--no-proxy" ] || [ "$arg" = "-np" ] || [ "$arg" = "noproxy" ]; then
+        USE_PROXY_DECIDED="false"
+    elif [ "$arg" = "--proxy" ] || [ "$arg" = "-p" ] || [ "$arg" = "proxy" ]; then
+        USE_PROXY_DECIDED="true"
+    else
+        TEMP_ARGS+=("$arg")
+    fi
+done
+
+# 重新分配过滤后的位置参数
+set -- "${TEMP_ARGS[@]}"
+
 PROMPT="$1"
 MODEL_GIVEN=""
 IMAGE=""
@@ -50,7 +81,6 @@ for arg in "$2" "$3"; do
         continue
     fi
     if [ -f "$arg" ]; then
-        # 如果是文件，绑定为图片
         IMAGE="$arg"
     else
         # 检查是否为已知模型
@@ -85,7 +115,7 @@ if [ -z "$MODEL_GIVEN" ]; then
     echo " 3) nemotron-3-super:cloud"
     echo "    - [最大输入] 128K tokens"
     echo "    - [最大输出] 8K tokens"
-    echo "    - [适用场景] NVIDIA 特别优化的超级模型，数学推导与硬核代码表现优异"
+    echo "    - [适用场景] NVIDIA 特别优化的超级模型，数学推导与硬硬编码表现优异"
     echo ""
     echo " 4) gemini-3-flash-preview:cloud"
     echo "    - [最大输入] 1,000K (1M) tokens"
@@ -103,7 +133,7 @@ if [ -z "$MODEL_GIVEN" ]; then
     echo "    - [适用场景] 深度求索高吞吐量极速 Flash 模型，反应敏捷，极速响应"
     echo "=========================================================================="
     
-    # 获取用户输入
+    # 获取用户输入模型
     read -p "请输入您的选择 [1-6] (默认 1): " choice
     
     case "$choice" in
@@ -114,12 +144,33 @@ if [ -z "$MODEL_GIVEN" ]; then
         6) MODEL="deepseek-v4-flash:cloud" ;;
         *) MODEL="gemma4:31b-cloud" ;; # 默认选 1
     esac
+
+    # 如果没有在命令行/环境变量中显式决定代理状态，进行交互式提问
+    if [ -z "$USE_PROXY_DECIDED" ]; then
+        echo ""
+        read -p "是否启用 SOCKS5 代理 ($DEFAULT_PROXY)? [y/n] (默认 y): " proxy_choice
+        if [[ "$proxy_choice" =~ ^[nN]$ ]]; then
+            USE_PROXY_DECIDED="false"
+        else
+            USE_PROXY_DECIDED="true"
+        fi
+    fi
 else
     MODEL="$MODEL_GIVEN"
+    # 非交互模式下，如果未做决定，默认启用代理
+    if [ -z "$USE_PROXY_DECIDED" ]; then
+        USE_PROXY_DECIDED="true"
+    fi
 fi
 
-# 确保 Proxy 变量正确
-PROXY="${ALL_PROXY:-$DEFAULT_PROXY}"
+# 确立代理环境
+if [ "$USE_PROXY_DECIDED" = "false" ]; then
+    PROXY_STATUS="已禁用 (Direct Connection)"
+    PROXY_VAL=""
+else
+    PROXY_VAL="${ALL_PROXY:-$DEFAULT_PROXY}"
+    PROXY_STATUS="已启用 ($PROXY_VAL)"
+fi
 
 echo ""
 echo "========================================="
@@ -129,14 +180,24 @@ echo "   模型:   $MODEL"
 if [ -n "$IMAGE" ]; then
 echo "   图片:   $IMAGE"
 fi
-echo "   代理:   $PROXY"
+echo "   代理:   $PROXY_STATUS"
 echo "========================================="
 echo ">>> 正在启动 Ollama..."
 echo ""
 
 # 调用 Ollama
-if [ -n "$IMAGE" ]; then
-    ALL_PROXY="$PROXY" ollama run "$MODEL" "$IMAGE" "$PROMPT"
+if [ "$USE_PROXY_DECIDED" = "false" ]; then
+    # 彻底清空代理变量进行直连
+    if [ -n "$IMAGE" ]; then
+        ALL_PROXY="" http_proxy="" https_proxy="" ALL_PROXY="" HTTP_PROXY="" HTTPS_PROXY="" ollama run "$MODEL" "$IMAGE" "$PROMPT"
+    else
+        ALL_PROXY="" http_proxy="" https_proxy="" ALL_PROXY="" HTTP_PROXY="" HTTPS_PROXY="" ollama run "$MODEL" "$PROMPT"
+    fi
 else
-    ALL_PROXY="$PROXY" ollama run "$MODEL" "$PROMPT"
+    # 启用配置的代理
+    if [ -n "$IMAGE" ]; then
+        ALL_PROXY="$PROXY_VAL" HTTP_PROXY="$PROXY_VAL" HTTPS_PROXY="$PROXY_VAL" http_proxy="$PROXY_VAL" https_proxy="$PROXY_VAL" ollama run "$MODEL" "$IMAGE" "$PROMPT"
+    else
+        ALL_PROXY="$PROXY_VAL" HTTP_PROXY="$PROXY_VAL" HTTPS_PROXY="$PROXY_VAL" http_proxy="$PROXY_VAL" https_proxy="$PROXY_VAL" ollama run "$MODEL" "$PROMPT"
+    fi
 fi
