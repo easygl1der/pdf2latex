@@ -160,24 +160,20 @@ echo "    [当前代理状态]: $PROXY_STATUS"
 PROMPT_FILE=$(mktemp)
 
 cat << 'EOF' > "$PROMPT_FILE"
-你是一个顶级的 LaTeX 排版专家。
-你的任务是将下面由 PDF 提取出的 Markdown 文本，无损地转化为结构优美、符合学术规范的、完整的、可编译的 LaTeX 源代码。
+You are a LaTeX format converter, not a writer or editor.
+Your sole task is to convert the Markdown text below into a complete, compilable LaTeX source file.
 
-【强制硬性要求】:
-1. 必须输出一整个完整的、可直接进行编译的 LaTeX 源码。即开头必须是 \documentclass{article} (或适合该内容的样式)，结尾必须是 \end{document}。
-2. 必须包含常用的科学包，例如：
-   \usepackage{amsmath}
-   \usepackage{amssymb}
-   \usepackage{amsthm}
-   \usepackage{graphicx}
-   \usepackage{hyperref}
-   \usepackage{booktabs}
-3. 精准转换公式：将所有行内公式和块级公式转化为标准的 LaTeX math 环境（如 $...$, $$, \begin{equation} 等）。
-4. 结构化目录：所有的 markdown 标题（#，##）转换为相应的 \section, \subsection。
-5. 转换 Markdown 表格：必须把 markdown 纯文本表格完美转化为 LaTeX 中的 \begin{tabular} 结构，不要保留 markdown 表格原样。
-6. 🚫【绝对禁用包裹符】🚫: 输出内容必须【仅有】LaTeX 源码本身。千万不要将输出内容包裹在 ```latex ... ``` 这种 markdown 代码块符号中！不要有任何前言或后记（例如"这是您的 LaTeX 源码："）。
+Rules (strictly follow all of them):
+1. Output ONLY raw LaTeX. Start with \documentclass and end with \end{document}. No preamble text, no explanations, no markdown code fences (no ```latex).
+2. Do NOT add, rewrite, summarize, or omit any content. Every sentence, every number, every figure caption from the Markdown must appear in the LaTeX output verbatim.
+3. Include standard packages: amsmath, amssymb, graphicx, booktabs, hyperref, fontspec, geometry.
+4. Convert inline math ($...$) and display math ($$...$$) to proper LaTeX math environments.
+5. Convert Markdown headings (#, ##, ###) to \section, \subsection, \subsubsection.
+6. Convert Markdown tables to \begin{tabular}...\end{tabular}. Never leave raw Markdown tables in the output.
+7. For images: use \includegraphics with the exact filename from the Markdown. Do not invent or replace filenames.
+8. Preserve the document's original language exactly. Do not translate or paraphrase.
 
-【待转换的 Markdown 文本内容】:
+Markdown content to convert:
 ==================================================
 EOF
 
@@ -224,9 +220,92 @@ open(p, 'w', encoding='utf-8').write(cleaned)
 
 echo ">>> [步骤 4/4] 净化完成！"
 echo ""
+
+# Step 5: 自动测试编译与闭环语法自我修复 (如果报错则触发 LLM 智能自我修正)
 echo "=========================================================="
-echo "✅ 转换流水线圆满完成！"
-echo " 转换后 LaTeX 目录: output/${BASENAME}/"
-echo " LaTeX 主文件路径:  $TEX_FILE"
-echo " (提示: 已为您生成标准的完整 LaTeX 代码，目前并未对其进行编译。)"
+echo "🔍 正在进行自动化测试编译与闭环语法自我修复检测..."
 echo "=========================================================="
+
+MAX_REPAIRS=3
+REPAIR_COUNT=0
+COMPILE_SUCCESS="false"
+
+while [ $REPAIR_COUNT -lt $MAX_REPAIRS ]; do
+    echo ""
+    echo ">>> [尝试 $((REPAIR_COUNT + 1))/$MAX_REPAIRS] 正在进行测试编译..."
+    
+    set +e # 临时关闭 set -e，以便捕获 compile_latex.sh 的退出码
+    ./compile_latex.sh "$TEX_FILE"
+    STATUS=$?
+    set -e
+    
+    if [ $STATUS -eq 0 ]; then
+        COMPILE_SUCCESS="true"
+        break
+    else
+        REPAIR_COUNT=$((REPAIR_COUNT + 1))
+        if [ $REPAIR_COUNT -ge $MAX_REPAIRS ]; then
+            break
+        fi
+        
+        echo ""
+        echo "⚠️  编译失败！检测到语法错误。正在启动第 $REPAIR_COUNT 次智能自我修复..."
+        
+        # 提取 clean 错误日志 (获取分割线之间的错误信息)
+        ERROR_LOG_EXTRACT=$(python3 -c "
+import sys, re
+log_path = 'output/${BASENAME}/${BASENAME}.log'
+try:
+    with open(log_path, 'r', encoding='utf-8', errors='ignore') as f:
+        lines = f.readlines()
+    errors = []
+    in_error = False
+    current_error = []
+    for line in lines:
+        if line.startswith('! '):
+            if current_error:
+                errors.append(''.join(current_error))
+            current_error = [line]
+            in_error = True
+        elif in_error:
+            if line.strip() == '' or line.startswith('Here is how much of'):
+                errors.append(''.join(current_error))
+                current_error = []
+                in_error = False
+            else:
+                current_error.append(line)
+    if current_error:
+        errors.append(''.join(current_error))
+    print('\n'.join(errors))
+except Exception as e:
+    print(f'Error: {e}')
+")
+
+        if [ -z "$ERROR_LOG_EXTRACT" ]; then
+            ERROR_LOG_EXTRACT="Unknown compilation error. Please check the log file."
+        fi
+
+        # 运行智能修复代理进行 In-place 修复
+        if [ "$USE_PROXY_DECIDED" = "false" ]; then
+            ALL_PROXY="" http_proxy="" https_proxy="" HTTP_PROXY="" HTTPS_PROXY="" python3 scripts/repair_latex.py "$MODEL" "$TEX_FILE" "$ERROR_LOG_EXTRACT"
+        else
+            ALL_PROXY="$PROXY_VAL" HTTP_PROXY="$PROXY_VAL" HTTPS_PROXY="$PROXY_VAL" http_proxy="$PROXY_VAL" https_proxy="$PROXY_VAL" python3 scripts/repair_latex.py "$MODEL" "$TEX_FILE" "$ERROR_LOG_EXTRACT"
+        fi
+    fi
+done
+
+if [ "$COMPILE_SUCCESS" = "true" ]; then
+    echo ""
+    echo "=========================================================="
+    echo "✅ 转换与文献合并成功！最终生成的 PDF 处于完美可阅读状态。"
+    echo " 成果目录: output/${BASENAME}/"
+    echo " PDF 文件: output/${BASENAME}/${BASENAME}.pdf"
+    echo "=========================================================="
+else
+    echo ""
+    echo "=========================================================="
+    echo "❌ 错误: 在进行了 $MAX_REPAIRS 次自我修复尝试后，编译依然存在错误。"
+    echo " 请查看诊断日志: output/${BASENAME}/${BASENAME}.log"
+    echo "=========================================================="
+    exit 1
+fi
