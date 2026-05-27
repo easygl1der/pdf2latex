@@ -76,13 +76,21 @@ echo "=========================================================="
 # Step 1: 运行 MinerU 提取 Markdown 并执行 pdf_fix 净化
 echo ""
 echo ">>> [步骤 1/4] 正在提取 PDF 文本并应用 pdf_fix 预处理..."
-./run_mineru.sh "$PDF_FILE"
+
+# ── 缓存检查 ───────────────────────────────────────────
+if [ -f "$MD_FILE" ]; then
+    echo ">>> [Cache] 检测到已存在 Markdown 预处理文件: $MD_FILE"
+    echo "    跳过 MinerU 云端转换，直接进入下一步。"
+else
+    ./run_mineru.sh "$PDF_FILE"
+fi
 
 if [ ! -f "$MD_FILE" ]; then
     echo "错误: 未能生成 Markdown 预处理文件 '$MD_FILE'，管道终止。"
     exit 1
 fi
-echo ">>> [步骤 1/4] 预处理成功！已生成 Markdown 文件: $MD_FILE"
+echo ">>> [步骤 1/4] 预处理成功！"
+
 
 # Step 2: 交互式选择用于 LaTeX 转换的 LLM 模型
 echo ""
