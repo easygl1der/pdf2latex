@@ -50,14 +50,17 @@ if [ ! -f "$PDF_FILE" ]; then
     exit 1
 fi
 
-# 1. 检查命令行中是否显式禁用了代理
+# 1. 检查命令行中是否显式禁用了代理或强制重新转换
 USE_PROXY_DECIDED=""
+FORCE_RECONVERT="false"
 TEMP_ARGS=()
 for arg in "$@"; do
     if [ "$arg" = "--no-proxy" ] || [ "$arg" = "-np" ] || [ "$arg" = "noproxy" ]; then
         USE_PROXY_DECIDED="false"
     elif [ "$arg" = "--proxy" ] || [ "$arg" = "-p" ] || [ "$arg" = "proxy" ]; then
         USE_PROXY_DECIDED="true"
+    elif [ "$arg" = "--force" ] || [ "$arg" = "-f" ] || [ "$arg" = "force" ]; then
+        FORCE_RECONVERT="true"
     else
         TEMP_ARGS+=("$arg")
     fi
@@ -71,6 +74,7 @@ echo "=========================================================="
 echo "    🚀  欢迎使用 PDF -> LaTeX 完整转换管道"
 echo "=========================================================="
 echo " PDF 文件: $PDF_FILE"
+echo " 强制重新转换: $FORCE_RECONVERT"
 echo "=========================================================="
 
 # Step 1: 运行 MinerU 提取 Markdown 并执行 pdf_fix 净化
@@ -78,12 +82,16 @@ echo ""
 echo ">>> [步骤 1/4] 正在提取 PDF 文本并应用 pdf_fix 预处理..."
 
 # ── 缓存检查 ───────────────────────────────────────────
-if [ -f "$MD_FILE" ]; then
+if [ "$FORCE_RECONVERT" = "false" ] && [ -f "$MD_FILE" ]; then
     echo ">>> [Cache] 检测到已存在 Markdown 预处理文件: $MD_FILE"
-    echo "    跳过 MinerU 云端转换，直接进入下一步。"
+    echo "    跳过 MinerU 云端转换，直接进入下一步。 (如需强制重新转换，请添加 -f 参数)"
 else
+    if [ "$FORCE_RECONVERT" = "true" ]; then
+        echo ">>> [Force] 强制重新启动 MinerU 转换流程..."
+    fi
     ./run_mineru.sh "$PDF_FILE"
 fi
+
 
 if [ ! -f "$MD_FILE" ]; then
     echo "错误: 未能生成 Markdown 预处理文件 '$MD_FILE'，管道终止。"

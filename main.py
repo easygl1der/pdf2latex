@@ -9,6 +9,7 @@ def main():
     parser.add_argument("pdf_path", help="Path to the PDF file")
     parser.add_argument("--model", default="nemotron-3-super:cloud", help="LLM model to use")
     parser.add_argument("--mode", default="original", choices=["original", "notes"], help="Conversion mode")
+    parser.add_argument("--force", "-f", action="store_true", help="Force re-conversion (ignore cache)")
     
     args = parser.parse_args()
     
@@ -21,9 +22,11 @@ def main():
         "pdf_path": str(Path(args.pdf_path).absolute()),
         "model_name": args.model,
         "mode": args.mode,
+        "force_reconvert": args.force,
         "chapter_outputs": [],
         "chapters": []
     }
+
 
     print("🚀 Starting PDF to LaTeX Pipeline...")
     graph = build_graph()

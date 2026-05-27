@@ -137,6 +137,7 @@ def converter_node(state: PipelineState) -> dict:
     print(f"\n[Step 0] MinerU PDF Conversion")
     pdf_path = Path(state["pdf_path"])
     out_dir = OUTPUT_ROOT / pdf_path.stem
+    force = state.get("force_reconvert", False)
     
     # ── Cache Check ───────────────────────────────────────────
     md_file_path = out_dir / f"{pdf_path.stem}.md"
@@ -144,7 +145,7 @@ def converter_node(state: PipelineState) -> dict:
     if not content_list_json.exists():
         content_list_json = out_dir / f"{pdf_path.stem}.json"
 
-    if md_file_path.exists() and content_list_json.exists():
+    if not force and md_file_path.exists() and content_list_json.exists():
         print(f"  [Cache] Found existing conversion in {out_dir}, skipping MinerU API call.")
         return {
             "markdown_path": str(md_file_path),
@@ -152,9 +153,14 @@ def converter_node(state: PipelineState) -> dict:
             "output_dir": str(out_dir)
         }
     
-    # ── No Cache: Run Conversion ──────────────────────────────
-    print(f"  [MinerU] No cache found. Starting fresh conversion...")
+    # ── No Cache or Force: Run Conversion ─────────────────────
+    if force:
+        print(f"  [Force] Overriding cache. Starting fresh conversion...")
+    else:
+        print(f"  [MinerU] No cache found. Starting fresh conversion...")
+    
     out_dir.mkdir(parents=True, exist_ok=True)
+
     md_file = mineru_convert_to_md(str(pdf_path), out_dir)
     
     # Re-check paths after conversion
