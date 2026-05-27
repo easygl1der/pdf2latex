@@ -2,29 +2,52 @@ import os
 import requests
 import json
 import time
+import base64
 from .config import MODELS
 
+def _encode_image(image_path: str) -> str:
+    with open(image_path, "rb") as image_file:
+        return base64.b64encode(image_file.read()).decode("utf-8")
+
 def call_llm(model_name: str, system: str, user: str, temperature: float = 0.3,
-             show_thinking: bool = False, max_retries: int = 3) -> str:
+             show_thinking: bool = False, image_path: str = None, max_retries: int = 3) -> str:
     """
-    Robust LLM caller using 'requests' with a simple retry mechanism.
+    Robust LLM caller using 'requests' with a simple retry mechanism, 
+    supporting vision and execution timing.
     """
     cfg = MODELS[model_name]
     url = f"{cfg['base_url']}/chat/completions"
     api_key = cfg["api_key"]()
     model = cfg["model"]
 
+    print(f"\n[LLM] Calling model: {model}")
+    start_time = time.time()
+
     headers = {
         "Authorization": f"Bearer {api_key}",
         "Content-Type": "application/json"
     }
 
+    messages = [{"role": "system", "content": system}]
+    
+    if image_path:
+        base64_image = _encode_image(image_path)
+        messages.append({
+            "role": "user",
+            "content": [
+                {"type": "text", "text": user},
+                {
+                    "type": "image_url",
+                    "image_url": {"url": f"data:image/jpeg;base64,{base64_image}"},
+                },
+            ],
+        })
+    else:
+        messages.append({"role": "user", "content": user})
+
     payload = {
         "model": model,
-        "messages": [
-            {"role": "system", "content": system},
-            {"role": "user", "content": user}
-        ],
+        "messages": messages,
         "temperature": temperature,
         "stream": False
     }
@@ -43,8 +66,13 @@ def call_llm(model_name: str, system: str, user: str, temperature: float = 0.3,
             result = response.json()
             content = result["choices"][0]["message"]["content"]
             
-            # Simple print for progress tracking
-            print(content[:100] + "..." if len(content) > 100 else content, flush=True)
+            if show_thinking:
+                print(content, flush=True)
+            else:
+                print(content[:100] + "..." if len(content) > 100 else content, flush=True)
+
+            end_time = time.time()
+            print(f"[LLM] Thinking Time: {end_time - start_time:.2f}s")
             return content
         except Exception as e:
             last_error = e
