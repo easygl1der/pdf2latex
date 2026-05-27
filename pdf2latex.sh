@@ -187,11 +187,11 @@ cat << 'EOF' >> "$PROMPT_FILE"
 ==================================================
 EOF
 
-# 运行 Ollama 将结果重定向输出为 .tex 文件
+# 运行 Python 客户端查询 Ollama API，获取干净的 LaTeX 源码输出 (避免终端 ANSI 动画与冗余日志污染文件)
 if [ "$USE_PROXY_DECIDED" = "false" ]; then
-    ALL_PROXY="" http_proxy="" https_proxy="" ALL_PROXY="" HTTP_PROXY="" HTTPS_PROXY="" ollama run "$MODEL" < "$PROMPT_FILE" > "$TEX_FILE"
+    ALL_PROXY="" http_proxy="" https_proxy="" HTTP_PROXY="" HTTPS_PROXY="" python3 scripts/query_ollama.py "$MODEL" "$PROMPT_FILE" "$TEX_FILE"
 else
-    ALL_PROXY="$PROXY_VAL" HTTP_PROXY="$PROXY_VAL" HTTPS_PROXY="$PROXY_VAL" http_proxy="$PROXY_VAL" https_proxy="$PROXY_VAL" ollama run "$MODEL" < "$PROMPT_FILE" > "$TEX_FILE"
+    ALL_PROXY="$PROXY_VAL" HTTP_PROXY="$PROXY_VAL" HTTPS_PROXY="$PROXY_VAL" http_proxy="$PROXY_VAL" https_proxy="$PROXY_VAL" python3 scripts/query_ollama.py "$MODEL" "$PROMPT_FILE" "$TEX_FILE"
 fi
 
 rm -f "$PROMPT_FILE"
@@ -201,16 +201,20 @@ echo ""
 echo ">>> [步骤 4/4] 正在对生成的 LaTeX 代码进行高精净化 (剥离 Markdown 包裹标签)..."
 
 python3 -c "
-import sys
+import sys, re
 p = sys.argv[1]
 content = open(p, encoding='utf-8').read().strip()
 
-# 如果首行是 \`\`\` 或者是 \`\`\`latex，则删掉首行
+# 1. 彻底去除 DeepSeek 或其他模型输出的 <think>...</think> 推理内容
+content = re.sub(r'<think>.*?</think>', '', content, flags=re.DOTALL).strip()
+
+# 2. 彻底去除可能存留的 Thinking... done thinking. 文本
+content = re.sub(r'(?i)thinking\s*\.\.\..*?done\s*thinking\.?', '', content, flags=re.DOTALL).strip()
+
+# 3. 剥离 Markdown 代码块包裹标签 (\`\`\`latex ... \`\`\`)
 lines = content.splitlines()
 if len(lines) > 0 and lines[0].strip().startswith('\`\`\`'):
     lines = lines[1:]
-
-# 如果尾行是 \`\`\`，则删掉尾行
 if len(lines) > 0 and lines[-1].strip().startswith('\`\`\`'):
     lines = lines[:-1]
 
