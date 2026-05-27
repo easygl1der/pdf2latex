@@ -1,4 +1,28 @@
 #!/bin/bash
+# ==============================================================================
+# MinerU 高清 PDF -> Markdown 转换与后处理清理工具 (run_mineru.sh)
+#
+# 这是一个 standalone 的 shell 脚本，封装了 MinerU v4 高清 PDF 解析 API。
+# 包含自动上传文件、状态轮询（每7秒一次）、解压重命名规范化，以及核心
+# \`core.pdf_fix\` 模块的高精度 LaTeX 公式与排版清理净化。
+#
+# 💡 使用场景案例与例子:
+#
+# 1. 转换并清理本地 PDF (输出自动放置于 output/ 目录下)
+#    ./run_mineru.sh pdf/test-6.pdf
+#
+# 2. 转换其他 PDF 文件 (例如测试论文)
+#    ./run_mineru.sh test/demo.pdf
+#
+# 📦 转换输出的规范结构 (以 test-6.pdf 为例):
+#    output/test-6/
+#    ├── test-6.pdf         # 备份的源 PDF 文件
+#    ├── test-6.md          # 经过 core.pdf_fix 完美清理后的 LaTeX 级 Markdown 文件
+#    ├── test-6.json        # 提取的最主要结构化列表 JSON 文件
+#    ├── test-6_layout.json # 版面分析细节 JSON 文件
+#    └── test-6_model.json  # 视觉模型转换原始 JSON 文件
+#
+# ==============================================================================
 
 # Exit immediately if a command exits with a non-zero status
 set -e
