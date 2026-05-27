@@ -1,0 +1,110 @@
+# vibe_proving 配置示例
+# 复制为 config.toml 后填写密钥。应用配置固定从 app/config.toml 读取。
+#
+#   cp config.example.toml config.toml
+#
+# 敏感字段请勿提交到 git（仓库已忽略 app/config.toml）。
+
+[llm]
+# OpenAI 兼容 Chat Completions 端点，支持任何兼容接口。
+#
+# 推荐 A（高性价比）：DeepSeek V4 Pro
+#   base_url = "https://api.deepseek.com/v1"
+#   model    = "deepseek-chat"
+#   申请 Key：https://platform.deepseek.com/api_keys
+#
+# 推荐 B（强推理）：Gemini 3.1 Pro Preview
+#   base_url = "https://generativelanguage.googleapis.com/v1beta/openai"
+#   model    = "gemini-3.1-pro-preview"
+#   申请 Key：https://aistudio.google.com/app/apikey
+#
+base_url = "https://api.openai.com/v1"
+api_key  = ""
+model    = "gpt-4o"
+timeout  = 120
+
+[theorem_search]
+base_url = "https://api.theoremsearch.com"
+timeout  = 10
+
+[latrace]
+# 可选：LATRACE 记忆服务，不配置不影响核心功能。
+# 默认关闭；只有本地/远端 LATRACE 服务可用时再改为 true。
+enabled     = false
+base_url    = "http://localhost:8000"
+tenant_id   = "vibe-proving"
+timeout     = 10
+
+[app]
+log_level = "INFO"
+max_context_pdf_pages = 10
+chat_context_turns = 4
+chat_context_max_chars = 6000
+
+[auth]
+# 超级账户可修改 API 配置；普通注册用户只能使用服务。
+superuser_username = "dev_user"
+superuser_password = "change-me-dev-password"
+session_days = 30
+default_quota = 50
+allow_register = true
+database_path = "data/app.db"
+cookie_secure = false
+
+[paper_review_agent]
+grobid_url = ""
+grobid_use_public_demo = false
+grobid_public_demo_url = "https://grobidorg-grobid.hf.space"
+mistral_ocr_url = ""
+
+[nanonets]
+# https://extraction-api.nanonets.com
+api_key = ""
+# Optional fallback keys. When the primary key returns a quota/rate-limit error,
+# PDF review tries these keys in order.
+api_keys = []
+max_poll_seconds = 900
+poll_interval_seconds = 2
+request_timeout_seconds = 120
+
+[mineru]
+# Agent Lightweight Extract API，无需 Token，IP 限频。
+# https://mineru.net/apiManage/docs
+base_url = "https://mineru.net/api/v1/agent"
+language = "ch"
+enable_table = true
+enable_formula = true
+is_ocr = false
+page_range = ""
+max_file_mb = 10
+poll_interval_seconds = 3
+poll_timeout_seconds = 300
+request_timeout_seconds = 120
+
+# Harmonic Aristotle — https://aristotle.harmonic.fun
+[aristotle]
+api_key                       = ""
+formalize_timeout_seconds     = 1800
+prove_timeout_seconds         = 1800
+poll_interval_seconds         = 15
+
+[formalization]
+leansearch_url = "https://leansearch.net/search"
+loogle_url = "https://loogle.lean-lang.org/json"
+external_search_timeout_seconds = 4.0
+keyword_timeout_seconds = 10
+retrieval_timeout_seconds = 20
+validation_timeout_seconds = 12
+blueprint_timeout_seconds = 20
+generate_timeout_seconds = 28
+repair_timeout_seconds = 24
+verify_timeout_seconds = 90
+beam_width = 1
+github_token = ""
+
+[kimina]
+url = ""
+api_key = ""
+timeout_seconds = 120
+allow_local_fallback = true
+mathlib_project = ""

@@ -1,0 +1,18 @@
+{
+  "model": "nemotron-3-super:cloud",
+  "stream": false,
+  "options": {
+    "num_ctx": 131072,
+    "num_predict": 65536
+  },
+  "messages": [
+    {
+      "role": "system",
+      "content": "You are a LaTeX expert. Convert the Markdown input into a complete, compilable standard LaTeX document. Output only raw LaTeX code starting with \\documentclass. No code fences, no explanation."
+    },
+    {
+      "role": "user",
+      "content": "Test"
+    }
+  ]
+}
