@@ -1,12 +1,14 @@
 from langgraph.graph import StateGraph, END
 from .nodes import (
-    PipelineState, classifier_node, skeleton_node,
+    PipelineState, converter_node, classifier_node, skeleton_node,
     dispatch_chapters, chapter_writer_node, assembler_node, compiler_node
 )
 
 def build_graph():
     workflow = StateGraph(PipelineState)
 
+    # 0. Convert PDF to Markdown
+    workflow.add_node("converter", converter_node)
     # 1. Classify document
     workflow.add_node("classifier", classifier_node)
     # 2. Build Skeleton
@@ -19,8 +21,10 @@ def build_graph():
     workflow.add_node("compiler", compiler_node)
 
     # Define edges
-    workflow.set_entry_point("classifier")
+    workflow.set_entry_point("converter")
+    workflow.add_edge("converter", "classifier")
     workflow.add_edge("classifier", "skeleton")
+
     
     # Use Send API for dynamic parallelism
     workflow.add_conditional_edges("skeleton", dispatch_chapters, ["chapter_writer"])

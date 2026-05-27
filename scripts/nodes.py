@@ -14,6 +14,7 @@ from .config import TEMPLATES, OUTPUT_ROOT
 from .llm import call_llm
 from .prompts import load_prompt
 from .writer_engine import create_skeleton, inject_content
+from .mineru_convert_wrapper import mineru_convert_to_md
 
 # ═══════════════════════════════════════════════════════════════
 # State Management
@@ -50,6 +51,11 @@ class WriterInput(TypedDict):
 # ═══════════════════════════════════════════════════════════════
 
 def _clean_res(res: str) -> str:
+    # 1. Strip <think> tags (deepseek-v3 / r1)
+    res = re.sub(r'<think>.*?</think>', '', res, flags=re.DOTALL).strip()
+    # 2. Strip thinking blocks
+    res = re.sub(r'(?i)thinking\s*\.\.\..*?done\s*thinking\.?', '', res, flags=re.DOTALL).strip()
+    # 3. Strip latex code fences
     res = re.sub(r"^```latex\n", "", res, flags=re.MULTILINE)
     res = res.replace("```", "").strip()
     return res
@@ -121,6 +127,23 @@ def get_style_prompt(mode: str = "original") -> str:
 # Nodes
 # ═══════════════════════════════════════════════════════════════
 
+def converter_node(state: PipelineState) -> dict:
+    print(f"\n[Step 0] MinerU PDF Conversion")
+    pdf_path = Path(state["pdf_path"])
+    out_dir = OUTPUT_ROOT / pdf_path.stem
+    out_dir.mkdir(parents=True, exist_ok=True)
+    
+    md_file = mineru_convert_to_md(str(pdf_path), out_dir)
+    content_list_json = out_dir / f"{pdf_path.stem}_content_list.json"
+    if not content_list_json.exists():
+        content_list_json = out_dir / f"{pdf_path.stem}.json"
+
+    return {
+        "markdown_path": md_file,
+        "content_list_path": str(content_list_json) if content_list_json.exists() else "",
+        "output_dir": str(out_dir)
+    }
+
 def classifier_node(state: PipelineState) -> dict:
     print("\n[Step 1] Classifier & Metadata Extraction (Vision Mode)")
     img_b64 = _get_pdf_first_page_image(state["pdf_path"])
@@ -139,15 +162,14 @@ def classifier_node(state: PipelineState) -> dict:
             if "DATE:" in p: date = p.split("DATE:")[1].strip()
     except Exception: pass
 
-    out_dir = OUTPUT_ROOT / Path(state["pdf_path"]).stem
-    out_dir.mkdir(parents=True, exist_ok=True)
+    out_dir = Path(state["output_dir"])
     
     return {
         "doc_type": doc_type, 
-        "output_dir": str(out_dir), 
         "template_name": "amsart" if doc_type == "paper" else "article",
         "doc_title": title, "doc_author": author, "doc_date": date
     }
+
 
 def skeleton_node(state: PipelineState) -> dict:
     """New Node: Generates the LaTeX skeleton."""
