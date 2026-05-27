@@ -89,20 +89,20 @@ echo ""
 echo "=========================================================================="
 echo "💡 请选择您想要用于将 Markdown 转换为 LaTeX 的云端模型 (请输入数字序号):"
 echo "=========================================================================="
-echo " 1) gemma4:31b-cloud (默认)"
-echo "    - [最大输入] 256K tokens (262,144)"
-echo "    - [最大输出] 32K tokens (32,768)"
-echo "    - [适用场景] Google 最新开源推理模型，公式推导及 LaTeX 语法排版极其优秀"
+echo " 1) nemotron-3-super:cloud (默认)"
+echo "    - [最大输入] 256K tokens (NIM API 限制为 131K)"
+echo "    - [最大输出] 128K tokens (NIM API 限制总量在 131K 内)"
+echo "    - [适用场景] NVIDIA 超强优化模型，数学公式、物理符号和科技格式非常严谨"
 echo ""
 echo " 2) glm-5.1:cloud"
 echo "    - [最大输入] 200K tokens (202,752)"
 echo "    - [最大输出] 128K tokens (131,072)"
 echo "    - [适用场景] 智谱最新旗舰双语模型，非常擅长中英双语科技文档排版"
 echo ""
-echo " 3) nemotron-3-super:cloud"
-echo "    - [最大输入] 256K tokens (NIM API 限制为 131K)"
-echo "    - [最大输出] 128K tokens (NIM API 限制总量在 131K 内)"
-echo "    - [适用场景] NVIDIA 超强优化模型，数学公式、物理符号和科技格式非常严谨"
+echo " 3) gemma4:31b-cloud"
+echo "    - [最大输入] 256K tokens (262,144)"
+echo "    - [最大输出] 32K tokens (32,768)"
+echo "    - [适用场景] Google 最新开源推理模型，公式推导及 LaTeX 语法排版极其优秀"
 echo ""
 echo " 4) gemini-3-flash-preview:cloud"
 echo "    - [最大输入] 1,000K (1M) tokens (1,048,576)"
@@ -124,11 +124,11 @@ read -p "请输入您的选择 [1-6] (默认 1): " choice
 
 case "$choice" in
     2) MODEL="glm-5.1:cloud" ;;
-    3) MODEL="nemotron-3-super:cloud" ;;
+    3) MODEL="gemma4:31b-cloud" ;;
     4) MODEL="gemini-3-flash-preview:cloud" ;;
     5) MODEL="kimi-k2.6:cloud" ;;
     6) MODEL="deepseek-v4-flash:cloud" ;;
-    *) MODEL="gemma4:31b-cloud" ;; # 默认选 1
+    *) MODEL="nemotron-3-super:cloud" ;; # 默认选 1
 esac
 
 # Step 3: 交互式选择代理选项

@@ -33,9 +33,9 @@ DEFAULT_PROXY="socks5://127.0.0.1:1080"
 
 # Supported models list
 MODELS=(
-    "gemma4:31b-cloud"
-    "glm-5.1:cloud"
     "nemotron-3-super:cloud"
+    "glm-5.1:cloud"
+    "gemma4:31b-cloud"
     "gemini-3-flash-preview:cloud"
     "kimi-k2.6:cloud"
     "deepseek-v4-flash:cloud"
@@ -130,20 +130,20 @@ if [ -z "$MODEL_GIVEN" ]; then
     echo "=========================================================================="
     echo "💡 未在命令行中指定模型，请选择您想要运行的云端模型 (请输入对应的数字序号):"
     echo "=========================================================================="
-    echo " 1) gemma4:31b-cloud (默认)"
-    echo "    - [最大输入] 256K tokens (262,144)"
-    echo "    - [最大输出] 32K tokens (32,768)"
-    echo "    - [适用场景] Google 最新开源推理模型，逻辑思考和代码生成能力极其拔尖"
+    echo " 1) nemotron-3-super:cloud (默认)"
+    echo "    - [最大输入] 256K tokens (NIM API 限制为 131K)"
+    echo "    - [最大输出] 128K tokens (NIM API 限制总量在 131K 内)"
+    echo "    - [适用场景] NVIDIA 特别优化的超级模型，数学推导与硬核代码表现优异"
     echo ""
     echo " 2) glm-5.1:cloud"
     echo "    - [最大输入] 200K tokens (202,752)"
     echo "    - [最大输出] 128K tokens (131,072)"
     echo "    - [适用场景] 智谱最新旗舰双语模型，中文流畅度与文案功底非常强"
     echo ""
-    echo " 3) nemotron-3-super:cloud"
-    echo "    - [最大输入] 256K tokens (NIM API 限制为 131K)"
-    echo "    - [最大输出] 128K tokens (NIM API 限制总量在 131K 内)"
-    echo "    - [适用场景] NVIDIA 特别优化的超级模型，数学推导与硬核代码表现优异"
+    echo " 3) gemma4:31b-cloud"
+    echo "    - [最大输入] 256K tokens (262,144)"
+    echo "    - [最大输出] 32K tokens (32,768)"
+    echo "    - [适用场景] Google 最新开源推理模型，逻辑思考和代码生成能力极其拔尖"
     echo ""
     echo " 4) gemini-3-flash-preview:cloud"
     echo "    - [最大输入] 1,000K (1M) tokens (1,048,576)"
@@ -166,11 +166,11 @@ if [ -z "$MODEL_GIVEN" ]; then
     
     case "$choice" in
         2) MODEL="glm-5.1:cloud" ;;
-        3) MODEL="nemotron-3-super:cloud" ;;
+        3) MODEL="gemma4:31b-cloud" ;;
         4) MODEL="gemini-3-flash-preview:cloud" ;;
         5) MODEL="kimi-k2.6:cloud" ;;
         6) MODEL="deepseek-v4-flash:cloud" ;;
-        *) MODEL="gemma4:31b-cloud" ;; # 默认选 1
+        *) MODEL="nemotron-3-super:cloud" ;; # 默认选 1
     esac
 
     # 如果没有在命令行/环境变量中显式决定代理状态，进行交互式提问
