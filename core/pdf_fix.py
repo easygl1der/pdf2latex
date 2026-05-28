@@ -103,6 +103,50 @@ def fix_spaced_text_commands(text: str) -> str:
     return re.sub(r'\\text\s*\{([^}]{3,})\}', _collapse, text)
 
 
+def fix_spaced_roman_commands(text: str) -> str:
+    r"""修复 \mathrm { l i n e a r } → \mathrm{linear} 等逐字 OCR 空格。"""
+    def _collapse(m: re.Match) -> str:
+        command = m.group(1)
+        content = m.group(2)
+        tokens = content.split()
+        if len(tokens) < 3:
+            return m.group(0)
+        if all(len(t) == 1 or t == '~' for t in tokens):
+            return f'\\{command}' + '{' + ''.join(tokens) + '}'
+        return m.group(0)
+
+    return re.sub(
+        r'\\(mathrm|operatorname|mathsf|mathit|mathbf)\s*\{([^{}]{3,})\}',
+        _collapse,
+        text,
+    )
+
+
+def fix_adjacent_math_segments(text: str) -> str:
+    r"""合并被 MinerU 拆开的相邻 inline math：$...\cong$ $\mathbb{...}$。"""
+    connector_re = re.compile(
+        r'(?:=|:=|\\cong|\\simeq|\\sim|\\in|\\subseteq?|\\supseteq?|'
+        r'\\to|\\mapsto|\\cdot|[+\-*/,(])\s*$'
+    )
+
+    def _merge(m: re.Match) -> str:
+        left = m.group(1).strip()
+        right = m.group(2).strip()
+        if connector_re.search(left):
+            return f'${left} {right}$'
+        return m.group(0)
+
+    prev = None
+    while prev != text:
+        prev = text
+        text = re.sub(
+            r'(?<!\$)\$([^$\n]+?)\$\s+\$([^$\n]+?)\$(?!\$)',
+            _merge,
+            text,
+        )
+    return text
+
+
 # ── 修复 3：数学环境中丢失的 \to 箭头 ───────────────────────────────────────
 
 _ARROW_RIGHT_TRIGGERS = (
@@ -156,6 +200,50 @@ def fix_digit_sequences(text: str) -> str:
     return re.sub(r'\$\$\n(.*?)\n\$\$', fix_display, text, flags=re.DOTALL)
 
 
+def fix_unicode_math_text_noise(text: str) -> str:
+    r"""保守修复数学上下文里的 Unicode 数学符号噪声。"""
+    replacements = {
+        '−': '-',
+        '∈': r'\in',
+        'Φ': r'\Phi',
+        'γ': r'\gamma',
+        'π': r'\pi',
+        'τ': r'\tau',
+        'β': r'\beta',
+    }
+
+    def _replace_math_symbols(s: str) -> str:
+        for old, new in replacements.items():
+            s = s.replace(old, new)
+        return s
+
+    def fix_display(m: re.Match) -> str:
+        return '$$\n' + _replace_math_symbols(m.group(1)) + '\n$$'
+
+    text = re.sub(r'\$\$\n(.*?)\n\$\$', fix_display, text, flags=re.DOTALL)
+
+    def fix_inline(m: re.Match) -> str:
+        return '$' + _replace_math_symbols(m.group(1)) + '$'
+
+    text = re.sub(
+        r'(?<!\$)\$(?!\$)([^$\n]{1,300}?)(?<!\$)\$(?!\$)',
+        fix_inline,
+        text,
+    )
+
+    def fix_short_context(m: re.Match) -> str:
+        before = m.group(1)
+        symbol = m.group(2)
+        after = m.group(3)
+        return before + r'\(' + replacements[symbol] + r'\)' + after
+
+    return re.sub(
+        r'([A-Za-z0-9_{}() /\-]{0,20})([∈Φγπτβ])([A-Za-z0-9_{}() /\-]{0,20})',
+        fix_short_context,
+        text,
+    )
+
+
 # ── 修复 5：常见 LaTeX OCR 别名 / 残缺命令 ─────────────────────────────────
 
 def fix_latex_ocr_aliases(text: str) -> str:
@@ -171,15 +259,110 @@ def fix_latex_ocr_aliases(text: str) -> str:
     return text
 
 
+def fix_markdown_section_headings(text: str) -> str:
+    """将 2.1. 小节标题转成二级 Markdown 标题。"""
+    def _heading(m: re.Match) -> str:
+        title = m.group(1).strip()
+        rest = (m.group(2) or "").strip()
+        if rest:
+            return f'## {title}\n\n{rest}'
+        return f'## {title}'
+
+    return re.sub(
+        r'^(?!#)(\d+\.\d+\. [A-Z][^.]{3,100}\.)(?:\s+(.+))?$',
+        _heading,
+        text,
+        flags=re.MULTILINE,
+    )
+
+
+def normalize_markdown_math_delimiters(text: str) -> str:
+    r"""将 Markdown 数学分隔符规范化为 \( \) 和 \[ \]。"""
+    text = re.sub(
+        r'\$\$\s*\n?(.*?)\n?\s*\$\$',
+        lambda m: '\\[\n' + m.group(1).strip() + '\n\\]',
+        text,
+        flags=re.DOTALL,
+    )
+    return re.sub(
+        r'(?<!\$)\$(?!\$)([^$\n]+?)(?<!\$)\$(?!\$)',
+        lambda m: r'\(' + m.group(1).strip() + r'\)',
+        text,
+    )
+
+
+def _fix_latex_math_blocks(text: str, fixer) -> str:
+    r"""对 \( \) 和 \[ \] 内部应用 fixer。"""
+    text = re.sub(
+        r'\\\[(.*?)\\\]',
+        lambda m: '\\[\n' + fixer(m.group(1).strip()) + '\n\\]',
+        text,
+        flags=re.DOTALL,
+    )
+    return re.sub(
+        r'\\\((.*?)\\\)',
+        lambda m: r'\(' + fixer(m.group(1).strip()) + r'\)',
+        text,
+        flags=re.DOTALL,
+    )
+
+
+def fix_latex_math_spacing(text: str) -> str:
+    r"""压紧数学环境里的 LaTeX OCR 空格，如 \mathbb { C } 和 _ { i }。"""
+    def fix_math(math: str) -> str:
+        math = re.sub(r'(\\[A-Za-z]+\*?)\s+\{', r'\1{', math)
+        math = re.sub(r'([_^])\s+\{', r'\1{', math)
+        math = re.sub(r'\{\s+([^{}\n]{1,80}?)\s+\}', r'{\1}', math)
+        math = re.sub(r'\{-\s+([^{}\s]+)\}', r'{-\1}', math)
+        math = re.sub(r'\s+([,;:])', r'\1', math)
+        math = re.sub(r'([([{])\s+', r'\1', math)
+        math = re.sub(r'\s+([)\]}])', r'\1', math)
+        math = re.sub(r'(?<=[A-Za-z0-9}])\s+(\()', r'\1', math)
+        math = re.sub(r'(?<=})\s+(?=\\[A-Za-z])', '', math)
+        math = re.sub(r'\s+([_^])', r'\1', math)
+        math = re.sub(r'([_^])\s+', r'\1', math)
+        return math
+
+    return _fix_latex_math_blocks(text, fix_math)
+
+
+_SPACED_MATH_WORDS = {
+    'D e s': 'Des',
+    'F l': 'Fl',
+    'G L': 'GL',
+    'i d': 'id',
+    'm i n': 'min',
+    'p t': 'pt',
+    'f l a g': 'flag',
+}
+
+
+def fix_spaced_math_words(text: str) -> str:
+    """修复数学环境内少量白名单逐字词。"""
+    def fix_math(math: str) -> str:
+        for spaced, compact in _SPACED_MATH_WORDS.items():
+            math = re.sub(rf'(?<![A-Za-z]){re.escape(spaced)}(?![A-Za-z])', compact, math)
+        return math
+
+    return _fix_latex_math_blocks(text, fix_math)
+
+
 # ── 主修复入口 ────────────────────────────────────────────────────────────────
 
 def fix_all(text: str) -> str:
     """依序应用全部修复，返回修复后的 Markdown 文本。"""
     text = fix_precomposed_chars(text)
     text = fix_spaced_text_commands(text)
+    text = fix_spaced_roman_commands(text)
+    text = fix_adjacent_math_segments(text)
     text = fix_missing_arrows(text)
+    text = fix_unicode_math_text_noise(text)
     text = fix_digit_sequences(text)
     text = fix_latex_ocr_aliases(text)
+    text = fix_markdown_section_headings(text)
+    text = normalize_markdown_math_delimiters(text)
+    text = fix_latex_math_spacing(text)
+    text = fix_spaced_math_words(text)
     return text
 
 
